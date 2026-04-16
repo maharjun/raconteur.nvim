@@ -29,16 +29,14 @@ local function parse_info_string(info)
   return lang, file, lines_start, lines_end
 end
 
---- Parse all raconteur code blocks in the buffer.
+--- Parse all raconteur code blocks from a list of lines.
 ---
 --- Returns a list of block descriptors ordered top-to-bottom.  Line numbers
 --- are **0-indexed** to match the nvim_buf_* API convention.
 ---
---- @param bufnr? integer  defaults to current buffer
+--- @param lines string[]  buffer or file lines
 --- @return table[]  blocks  list of block descriptors
-function M.parse(bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+function M.parse_lines(lines)
   local blocks = {}
   local i = 1
 
@@ -86,6 +84,16 @@ function M.parse(bufnr)
   end
 
   return blocks
+end
+
+--- Parse all raconteur code blocks in a buffer.
+--- Convenience wrapper around parse_lines().
+--- @param bufnr? integer  defaults to current buffer
+--- @return table[]  blocks
+function M.parse(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  return M.parse_lines(lines)
 end
 
 return M

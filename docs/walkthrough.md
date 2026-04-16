@@ -6,7 +6,7 @@ the referenced code rendered inline and to navigate with `gf`.
 
 ## 1. Entry Point
 
-Everything starts in `plugin/raconteur.lua`.  It registers the four user
+Everything starts in `plugin/raconteur.lua`.  It registers the user
 commands and sets a load guard so the file is only sourced once:
 
 ```lua file=plugin/raconteur.lua
@@ -19,18 +19,18 @@ The commands are thin wrappers — all logic lives in `lua/raconteur/init.lua`.
 When you call `require("raconteur").setup({})`, the plugin merges your
 config and creates a `FileType markdown` autocmd that triggers `attach()`:
 
-```lua file=lua/raconteur/init.lua lines=28-44
+```lua file=lua/raconteur/init.lua lines=29-45
 ```
 
-`attach()` is where the real work starts.  It parses the buffer, renders
-every block, locks the buffer, and sets up keymaps:
+`attach()` is where the real work starts.  It parses the buffer, sets up
+keymaps (toggle, gf, DiffView), and registers write/wipeout autocmds:
 
-```lua file=lua/raconteur/init.lua lines=53-73
+```lua file=lua/raconteur/init.lua lines=54-87
 ```
 
 ## 3. Parsing
 
-The parser does a single O(n) pass over the buffer lines.  It matches
+The parser does a single O(n) pass over a list of lines.  It matches
 opening fences with a `file=` attribute, extracts the metadata, then
 scans forward for the matching closing fence:
 
@@ -38,9 +38,10 @@ scans forward for the matching closing fence:
 ```
 
 The main loop builds up block descriptors with 0-indexed line numbers
-(matching the `nvim_buf_*` API convention):
+(matching the `nvim_buf_*` API convention).  `parse_lines()` takes a
+plain string table — `parse()` is a thin buffer wrapper:
 
-```lua file=lua/raconteur/parser.lua lines=39-89
+```lua file=lua/raconteur/parser.lua lines=39-97
 ```
 
 ## 4. Rendering
@@ -77,10 +78,41 @@ block you're in and computes the target line in the source file:
 It then switches to the previous tab page (or creates a new one), reuses
 an existing window if the file is already open, and centres the view:
 
-```lua file=lua/raconteur/navigator.lua lines=55-112
+```lua file=lua/raconteur/navigator.lua lines=54-139
 ```
 
-## 6. Utilities
+## 6. DiffView Integration
+
+The DiffView module provides context-aware diff opening.  It detects
+which code block the cursor is on and scopes `DiffviewOpen` to that
+file.  When the cursor is outside any block, the commands fall through
+to their normal unscoped behaviour:
+
+```lua file=lua/raconteur/diffview.lua lines=26-43
+```
+
+After opening, a polling retry finds the rightmost (new-version) panel
+and scrolls to the referenced line range:
+
+```lua file=lua/raconteur/diffview.lua lines=51-92
+```
+
+The main entry point assembles the command, hides the file panel (since
+we're scoped to one file), and kicks off the line jump:
+
+```lua file=lua/raconteur/diffview.lua lines=100-117
+```
+
+## 7. Fill Engine
+
+The fill module provides the same resolve-and-replace logic as the
+renderer but operates on plain string tables instead of Neovim buffers.
+This powers the `scripts/fill.lua` CLI tool:
+
+```lua file=lua/raconteur/fill.lua lines=21-58
+```
+
+## 8. Utilities
 
 The utils module provides git-root caching (so repeated renders don't hit
 the filesystem), an early-exit file reader that bails at `end_line`, and
@@ -96,9 +128,9 @@ the entire file into memory:
 ```lua file=lua/raconteur/utils.lua lines=66-85
 ```
 
-## 7. Configuration
+## 9. Configuration
 
 All defaults live in `config.lua`.  Users override them via `setup()`:
 
-```lua file=lua/raconteur/config.lua lines=4-24
+```lua file=lua/raconteur/config.lua lines=4-26
 ```
