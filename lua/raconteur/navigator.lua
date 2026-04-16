@@ -47,38 +47,19 @@ function M.find_block_at_cursor(bufnr, block_states, ns_id)
   return nil, 0
 end
 
---- Open the source file for the block under the cursor.
----
---- @param bufnr        integer
---- @param block_states table[]
---- @param ns_id        integer
-function M.goto_source(bufnr, block_states, ns_id)
-  local bs, offset = M.find_block_at_cursor(bufnr, block_states, ns_id)
-  if not bs then
-    utils.notify("No source reference under cursor", vim.log.levels.WARN)
-    return
-  end
-
-  local abs_path = utils.resolve_path(bs.file, bufnr)
-  if not abs_path then
-    utils.notify("File not found: " .. bs.file, vim.log.levels.ERROR)
-    return
-  end
-
-  -- Target line in the source file.
-  local target_line = (bs.lines_start or 1) + offset
-
-  -- ── Tab navigation ──────────────────────────────────────────────
+--- Open a file in the previous tab (or a new tab) at the given line.
+--- Shared by both rendered and parsed navigation paths.
+--- @param abs_path    string
+--- @param target_line integer  1-based
+local function open_in_tab(abs_path, target_line)
   local cur_tab = vim.api.nvim_get_current_tabpage()
   local tabs    = vim.api.nvim_list_tabpages()
 
   if #tabs > 1 then
-    -- Prefer the alternate tab (the one we last visited).
     local prev_tabnr = vim.fn.tabpagenr("#")
     if prev_tabnr > 0 and prev_tabnr ~= vim.fn.tabpagenr() then
       vim.cmd(prev_tabnr .. "tabnext")
     else
-      -- Fallback: first tab that isn't the current one.
       for _, tab_id in ipairs(tabs) do
         if tab_id ~= cur_tab then
           vim.api.nvim_set_current_tabpage(tab_id)
@@ -87,7 +68,6 @@ function M.goto_source(bufnr, block_states, ns_id)
       end
     end
 
-    -- If the file is already open in a window in this tab, just focus it.
     local target_bufnr = vim.fn.bufnr(abs_path)
     if target_bufnr ~= -1 then
       for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
@@ -100,15 +80,60 @@ function M.goto_source(bufnr, block_states, ns_id)
       end
     end
 
-    -- File not visible in this tab — open it in the current window.
     vim.cmd("edit " .. vim.fn.fnameescape(abs_path))
   else
-    -- No other tab exists — create one.
     vim.cmd("tabnew " .. vim.fn.fnameescape(abs_path))
   end
 
   vim.api.nvim_win_set_cursor(0, { target_line, 0 })
   vim.cmd("normal! zz")
+end
+
+--- Navigate from a rendered (view mode) buffer using extmark positions.
+--- @param bufnr        integer
+--- @param block_states table[]
+--- @param ns_id        integer
+function M.goto_source_rendered(bufnr, block_states, ns_id)
+  local bs, offset = M.find_block_at_cursor(bufnr, block_states, ns_id)
+  if not bs then
+    utils.notify("No source reference under cursor", vim.log.levels.WARN)
+    return
+  end
+
+  local abs_path = utils.resolve_path(bs.file, bufnr)
+  if not abs_path then
+    utils.notify("File not found: " .. bs.file, vim.log.levels.ERROR)
+    return
+  end
+
+  open_in_tab(abs_path, (bs.lines_start or 1) + offset)
+end
+
+--- Navigate from an unrendered (edit mode) buffer using parsed block positions.
+--- The cursor just needs to be on or between the fence lines.
+--- @param bufnr  integer
+--- @param blocks table[]  block descriptors from parser.parse()
+function M.goto_source_parsed(bufnr, blocks)
+  if not blocks or #blocks == 0 then
+    utils.notify("No source reference under cursor", vim.log.levels.WARN)
+    return
+  end
+
+  local cursor_line = vim.api.nvim_win_get_cursor(0)[1] - 1 -- 0-indexed
+
+  for _, block in ipairs(blocks) do
+    if cursor_line >= block.fence_open_line and cursor_line <= block.fence_close_line then
+      local abs_path = utils.resolve_path(block.file, bufnr)
+      if not abs_path then
+        utils.notify("File not found: " .. block.file, vim.log.levels.ERROR)
+        return
+      end
+      open_in_tab(abs_path, block.lines_start or 1)
+      return
+    end
+  end
+
+  utils.notify("No source reference under cursor", vim.log.levels.WARN)
 end
 
 return M

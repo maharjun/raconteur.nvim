@@ -45,30 +45,72 @@ end
 
 -- ── Buffer attach / detach ───────────────────────────────────────────
 
---- Attach to a markdown buffer: parse, render, and set keymaps.
---- Called automatically on FileType if auto_render is enabled, or manually
---- via :RaconteurRender.
+--- Attach to a markdown buffer: check for code references and set up the
+--- toggle keymap.  Does NOT auto-render — the buffer opens in edit mode
+--- and the user toggles into view mode when ready.
 ---
 --- @param bufnr? integer
 function M.attach(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
-  if M.state[bufnr] and M.state[bufnr].rendered then return end
+  if M.state[bufnr] then return end
 
+  -- Quick check: does this buffer have any raconteur code blocks?
   local blocks = parser.parse(bufnr)
   if #blocks == 0 then return end
 
-  vim.bo[bufnr].modifiable = true
-  local block_states = renderer.render_all(bufnr, blocks)
-  vim.bo[bufnr].modifiable = false
+  M.state[bufnr] = { rendered = false, blocks = nil }
 
-  M.state[bufnr] = { rendered = true, blocks = block_states }
-  M._set_keymaps(bufnr)
+  -- Set keymaps that work in both modes: toggle and gf.
+  local km = config.get().keymaps
+  vim.keymap.set("n", km.toggle_edit, function() M.toggle(bufnr) end,
+    { buffer = bufnr, silent = true, desc = "Raconteur: toggle edit" })
+  vim.keymap.set("n", km.goto_source, function() M.goto_source(bufnr) end,
+    { buffer = bufnr, silent = true, desc = "Raconteur: go to source" })
+
+  -- Strip rendered content before writing so only the original markdown
+  -- (with empty fence bodies) hits disk.  Re-render afterwards.
+  local augroup = vim.api.nvim_create_augroup("raconteur_buf_" .. bufnr, { clear = true })
+
+  vim.api.nvim_create_autocmd("BufWritePre", {
+    group    = augroup,
+    buffer   = bufnr,
+    callback = function()
+      local st = M.state[bufnr]
+      if st and st.rendered then
+        vim.bo[bufnr].modifiable = true
+        renderer.clear_all(bufnr, st.blocks)
+        st._pre_write = true
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd("BufWritePost", {
+    group    = augroup,
+    buffer   = bufnr,
+    callback = function()
+      local st = M.state[bufnr]
+      if st and st._pre_write then
+        st._pre_write = nil
+        local blocks = parser.parse(bufnr)
+        if #blocks > 0 then
+          st.blocks = renderer.render_all(bufnr, blocks)
+          st.rendered = true
+          vim.bo[bufnr].modifiable = false
+          vim.bo[bufnr].modified = false
+        end
+      end
+    end,
+  })
 
   -- Clean up when the buffer is wiped out.
   vim.api.nvim_create_autocmd("BufWipeout", {
+    group    = augroup,
     buffer   = bufnr,
     once     = true,
-    callback = function() M.state[bufnr] = nil end,
+    callback = function()
+      M.state[bufnr] = nil
+      vim.api.nvim_del_augroup_by_id(augroup)
+    end,
   })
 end
 
@@ -89,9 +131,13 @@ function M.render(bufnr)
     return
   end
 
+  -- Render, then restore the modified flag and lock the buffer.
+  -- Inserting content is a display concern, not a real edit.
+  local was_modified = vim.bo[bufnr].modified
   vim.bo[bufnr].modifiable = true
   local block_states = renderer.render_all(bufnr, blocks)
   vim.bo[bufnr].modifiable = false
+  vim.bo[bufnr].modified = was_modified
 
   M.state[bufnr] = { rendered = true, blocks = block_states }
   M._set_keymaps(bufnr)
@@ -104,8 +150,11 @@ function M.clear(bufnr)
   local st = M.state[bufnr]
   if not st or not st.rendered then return end
 
+  -- Restore content, then restore the modified flag.
+  local was_modified = vim.bo[bufnr].modified
   vim.bo[bufnr].modifiable = true
   renderer.clear_all(bufnr, st.blocks)
+  vim.bo[bufnr].modified = was_modified
 
   M.state[bufnr] = { rendered = false, blocks = nil }
   M._clear_keymaps(bufnr)
@@ -132,36 +181,35 @@ function M.toggle(bufnr)
 end
 
 --- Jump to the source file for the code block under the cursor.
+--- Works in both view mode (uses extmarks) and edit mode (re-parses).
 --- @param bufnr? integer
 function M.goto_source(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   local st = M.state[bufnr]
-  if not st or not st.rendered then
-    utils.notify("Buffer not rendered", vim.log.levels.WARN)
-    return
+
+  if st and st.rendered then
+    navigator.goto_source_rendered(bufnr, st.blocks, renderer.namespace())
+  else
+    local blocks = parser.parse(bufnr)
+    navigator.goto_source_parsed(bufnr, blocks)
   end
-  navigator.goto_source(bufnr, st.blocks, renderer.namespace())
 end
 
--- ── Keymaps (buffer-local, view mode only) ───────────────────────────
+-- ── Keymaps ──────────────────────────────────────────────────────────
 
+--- Set view-mode keymaps (refresh).  Toggle and gf are set once in attach().
 --- @param bufnr integer
 function M._set_keymaps(bufnr)
-  local km  = config.get().keymaps
-  local set = function(lhs, fn, desc)
-    vim.keymap.set("n", lhs, fn, { buffer = bufnr, silent = true, desc = desc })
-  end
-  set(km.goto_source, function() M.goto_source(bufnr) end, "Raconteur: go to source")
-  set(km.refresh,     function() M.refresh(bufnr)     end, "Raconteur: refresh")
-  set(km.toggle_edit, function() M.toggle(bufnr)      end, "Raconteur: toggle edit")
+  local km = config.get().keymaps
+  vim.keymap.set("n", km.refresh, function() M.refresh(bufnr) end,
+    { buffer = bufnr, silent = true, desc = "Raconteur: refresh" })
 end
 
+--- Remove view-mode keymaps.  Toggle and gf persist across modes.
 --- @param bufnr integer
 function M._clear_keymaps(bufnr)
   local km = config.get().keymaps
-  for _, lhs in ipairs({ km.goto_source, km.refresh, km.toggle_edit }) do
-    pcall(vim.keymap.del, "n", lhs, { buffer = bufnr })
-  end
+  pcall(vim.keymap.del, "n", km.refresh, { buffer = bufnr })
 end
 
 return M
