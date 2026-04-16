@@ -10,6 +10,9 @@ local defaults = {
     goto_source = "gf",        -- open referenced file in previous tab
     refresh     = "<leader>rr", -- re-read source files and re-render
     toggle_edit = "<leader>re", -- toggle between view (read-only) and edit mode
+    diff_open   = "<leader>gd", -- DiffView: working tree diff for block's file
+    diff_main   = "<leader>gm", -- DiffView: diff against main for block's file
+    diff_target = "<leader>gt", -- DiffView: diff with custom target (set via :RaconteurDiffTarget)
   },
 
   -- Show "file:start-end" as virtual text on the opening fence line.

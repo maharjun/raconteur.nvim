@@ -13,6 +13,7 @@ local config    = require("raconteur.config")
 local parser    = require("raconteur.parser")
 local renderer  = require("raconteur.renderer")
 local navigator = require("raconteur.navigator")
+local diffview  = require("raconteur.diffview")
 local utils     = require("raconteur.utils")
 
 --- Per-buffer state.
@@ -66,6 +67,24 @@ function M.attach(bufnr)
     { buffer = bufnr, silent = true, desc = "Raconteur: toggle edit" })
   vim.keymap.set("n", km.goto_source, function() M.goto_source(bufnr) end,
     { buffer = bufnr, silent = true, desc = "Raconteur: go to source" })
+
+  -- DiffView integration: context-aware diff opening.
+  -- On a block → scoped to that file.  Off a block → normal unscoped DiffView.
+  vim.keymap.set("n", km.diff_open, function()
+    diffview.open_diff(bufnr, M.state[bufnr], "", "DiffviewOpen")
+  end, { buffer = bufnr, silent = true, desc = "Raconteur: diff (working tree)" })
+
+  vim.keymap.set("n", km.diff_main, function()
+    diffview.open_diff(bufnr, M.state[bufnr], "origin/main...HEAD", "DiffviewOpen origin/main...HEAD")
+  end, { buffer = bufnr, silent = true, desc = "Raconteur: diff against main" })
+
+  vim.keymap.set("n", km.diff_target, function()
+    if not diffview.diff_target then
+      utils.notify("No diff target set. Use :RaconteurDiffTarget <rev> to set one.", vim.log.levels.WARN)
+      return
+    end
+    diffview.open_diff(bufnr, M.state[bufnr], diffview.diff_target, "DiffviewOpen " .. diffview.diff_target)
+  end, { buffer = bufnr, silent = true, desc = "Raconteur: diff with custom target" })
 
   -- Strip rendered content before writing so only the original markdown
   -- (with empty fence bodies) hits disk.  Re-render afterwards.
