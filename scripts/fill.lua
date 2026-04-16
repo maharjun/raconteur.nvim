@@ -37,10 +37,25 @@ if not root_dir then
   end
 end
 
-local ok, err = fill.fill_file(filepath, root_dir)
-if not ok then
-  io.stderr:write("Error: " .. err .. "\n")
+-- Read, fill, and write to a .filled sibling.
+local f = io.open(filepath, "r")
+if not f then
+  io.stderr:write("Cannot open: " .. filepath .. "\n")
   os.exit(1)
 end
+local lines = {}
+for line in f:lines() do lines[#lines + 1] = line end
+f:close()
 
-print("Filled: " .. filepath)
+local filled = fill.fill_lines(lines, root_dir)
+
+local out_path = filepath:gsub("(%.[^.]+)$", ".filled%1")
+f = io.open(out_path, "w")
+if not f then
+  io.stderr:write("Cannot write: " .. out_path .. "\n")
+  os.exit(1)
+end
+for _, line in ipairs(filled) do f:write(line .. "\n") end
+f:close()
+
+print("Wrote: " .. out_path)
