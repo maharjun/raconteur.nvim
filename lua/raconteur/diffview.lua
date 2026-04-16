@@ -42,49 +42,53 @@ local function block_under_cursor(bufnr, state)
   return nil
 end
 
---- After DiffView opens, find the buffer for our target file and jump
---- to the referenced line range.  We listen for the diff_buf_read event
---- via a one-shot User autocmd.
+--- Try to find the rightmost window showing our file and jump to the
+--- target line.  DiffView lays out windows left-to-right: file panel →
+--- old version → new version.  We want the new (right) side.
+--- @param file       string   repo-relative path (plain substring match)
+--- @param line_start integer  1-based
+--- @return boolean  true if the window was found and focused
+local function try_focus_file(file, line_start)
+  local target_win, target_buf
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    local name = vim.api.nvim_buf_get_name(buf)
+    if name:find(file, 1, true) then
+      target_win = win
+      target_buf = buf
+    end
+  end
+  if not target_win then return false end
+
+  vim.api.nvim_set_current_win(target_win)
+  local line_count = vim.api.nvim_buf_line_count(target_buf)
+  local target = math.min(line_start, line_count)
+  vim.api.nvim_win_set_cursor(target_win, { target, 0 })
+  vim.cmd("normal! zz")
+  return true
+end
+
+--- After DiffView opens, poll until the diff buffers are ready, then
+--- focus the right panel at the target line.  DiffView loads buffers
+--- asynchronously so we retry a few times with increasing delays.
 --- @param file       string  repo-relative path
 --- @param line_start integer|nil  1-based
 local function jump_after_open(file, line_start)
   if not line_start then return end
 
-  -- DiffView fires User DiffviewDiffBufRead when a diff buffer is loaded.
-  -- We set a one-shot autocmd that checks whether the loaded buffer matches
-  -- our target file, then scrolls to the line.
-  local fired = false
-  local augroup = vim.api.nvim_create_augroup("raconteur_dv_jump", { clear = true })
+  local attempts = 0
+  local max_attempts = 4
+  local delays = { 50, 150, 300, 500 }
 
-  vim.api.nvim_create_autocmd("User", {
-    group    = augroup,
-    pattern  = "DiffviewDiffBufRead",
-    callback = function()
-      if fired then return end
-      -- Check all windows in the current tab for our file
-      vim.schedule(function()
-        for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-          local buf = vim.api.nvim_win_get_buf(win)
-          local name = vim.api.nvim_buf_get_name(buf)
-          if name:find(file, 1, true) then
-            vim.api.nvim_set_current_win(win)
-            local line_count = vim.api.nvim_buf_line_count(buf)
-            local target = math.min(line_start, line_count)
-            vim.api.nvim_win_set_cursor(win, { target, 0 })
-            vim.cmd("normal! zz")
-            fired = true
-            vim.api.nvim_del_augroup_by_id(augroup)
-            return
-          end
-        end
-      end)
-    end,
-  })
+  local function try()
+    attempts = attempts + 1
+    if try_focus_file(file, line_start) then return end
+    if attempts < max_attempts then
+      vim.defer_fn(try, delays[attempts + 1])
+    end
+  end
 
-  -- Safety: clean up the autocmd after a few seconds if it never fires
-  vim.defer_fn(function()
-    pcall(vim.api.nvim_del_augroup_by_id, augroup)
-  end, 5000)
+  vim.defer_fn(try, delays[1])
 end
 
 --- Open DiffView scoped to the block under the cursor, or fall through
@@ -107,8 +111,9 @@ function M.open_diff(bufnr, state, rev_args, fallback)
   end
   cmd = cmd .. " -- " .. file
 
-  jump_after_open(file, lines_start)
   vim.cmd(cmd)
+  vim.cmd("DiffviewToggleFiles")
+  jump_after_open(file, lines_start)
 end
 
 return M
