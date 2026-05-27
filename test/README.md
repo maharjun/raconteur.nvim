@@ -44,5 +44,5 @@ changed sections of the enhanced file.
    should fall through to an unscoped `DiffviewOpen 1c1a742...HEAD`
    showing all files changed in that range.
 
-7. Press `gf` on a code block — this still opens the source file in
+7. Press `<leader>gf` on a code block — this still opens the source file in
    the previous tab (unchanged behaviour).

@@ -1,6 +1,6 @@
 --- Tab-based navigation: jump from a rendered code block to the source file.
 ---
---- Behaviour mirrors DiffView's `gf`:
+--- Behaviour mirrors DiffView's goto-file:
 ---   1. Determine which rendered block the cursor sits in.
 ---   2. Compute the corresponding line in the source file.
 ---   3. Switch to the previous tab page (the "alternate" tab, tracked by

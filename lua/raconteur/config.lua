@@ -7,7 +7,7 @@ local defaults = {
   auto_render = true,
 
   keymaps = {
-    goto_source = "gf",        -- open referenced file in previous tab
+    goto_source = "<leader>gf", -- open referenced file in previous tab
     refresh     = "<leader>rr", -- re-read source files and re-render
     toggle_edit = "<leader>re", -- toggle between view (read-only) and edit mode
     diff_open   = "<leader>gd", -- DiffView: working tree diff for block's file

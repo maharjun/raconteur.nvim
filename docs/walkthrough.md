@@ -2,7 +2,7 @@
 
 This document walks through the plugin's internals using raconteur's own
 code-reference syntax.  Open it in Neovim with the plugin installed to see
-the referenced code rendered inline and to navigate with `gf`.
+the referenced code rendered inline and to navigate with `<leader>gf`.
 
 ## 1. Entry Point
 
@@ -23,7 +23,7 @@ config and creates a `FileType markdown` autocmd that triggers `attach()`:
 ```
 
 `attach()` is where the real work starts.  It parses the buffer, sets up
-keymaps (toggle, gf, DiffView), and registers write/wipeout autocmds:
+keymaps (toggle, goto-source, DiffView), and registers write/wipeout autocmds:
 
 ```lua file=lua/raconteur/init.lua lines=54-87
 ```
@@ -69,7 +69,7 @@ the original (empty) fence bodies:
 
 ## 5. Navigation
 
-When you press `gf` on a rendered block, the navigator figures out which
+When you press `<leader>gf` on a rendered block, the navigator figures out which
 block you're in and computes the target line in the source file:
 
 ```lua file=lua/raconteur/navigator.lua lines=27-48

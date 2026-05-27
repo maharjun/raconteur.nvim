@@ -61,23 +61,17 @@ function M.attach(bufnr)
 
   M.state[bufnr] = { rendered = false, blocks = nil }
 
-  -- Set keymaps that work in both modes: toggle and gf.
   local km = config.get().keymaps
   vim.keymap.set("n", km.toggle_edit, function() M.toggle(bufnr) end,
     { buffer = bufnr, silent = true, desc = "Raconteur: toggle edit" })
   vim.keymap.set("n", km.goto_source, function() M.goto_source(bufnr) end,
     { buffer = bufnr, silent = true, desc = "Raconteur: go to source" })
-
-  -- DiffView integration: context-aware diff opening.
-  -- On a block → scoped to that file.  Off a block → normal unscoped DiffView.
   vim.keymap.set("n", km.diff_open, function()
     diffview.open_diff(bufnr, M.state[bufnr], "", "DiffviewOpen")
   end, { buffer = bufnr, silent = true, desc = "Raconteur: diff (working tree)" })
-
   vim.keymap.set("n", km.diff_main, function()
     diffview.open_diff(bufnr, M.state[bufnr], "origin/main...HEAD", "DiffviewOpen origin/main...HEAD")
   end, { buffer = bufnr, silent = true, desc = "Raconteur: diff against main" })
-
   vim.keymap.set("n", km.diff_target, function()
     if not diffview.diff_target then
       utils.notify("No diff target set. Use :RaconteurDiffTarget <rev> to set one.", vim.log.levels.WARN)
@@ -216,7 +210,7 @@ end
 
 -- ── Keymaps ──────────────────────────────────────────────────────────
 
---- Set view-mode keymaps (refresh).  Toggle and gf are set once in attach().
+--- Set view-mode keymaps (refresh).  Cross-mode keymaps are set in attach().
 --- @param bufnr integer
 function M._set_keymaps(bufnr)
   local km = config.get().keymaps
@@ -224,7 +218,7 @@ function M._set_keymaps(bufnr)
     { buffer = bufnr, silent = true, desc = "Raconteur: refresh" })
 end
 
---- Remove view-mode keymaps.  Toggle and gf persist across modes.
+--- Remove view-mode keymaps.  Cross-mode keymaps persist.
 --- @param bufnr integer
 function M._clear_keymaps(bufnr)
   local km = config.get().keymaps
