@@ -84,6 +84,27 @@ function M.read_file_lines(abs_path, start_line, end_line)
   return lines, nil
 end
 
+--- Length of the longest pure-backtick line in `lines`.
+---
+--- A line consisting only of backticks (with optional surrounding whitespace)
+--- closes a fenced code block in CommonMark when it has at least as many
+--- backticks as the opening fence.  Backslash escapes are NOT processed
+--- inside fenced blocks, so the only way to keep such a line from closing
+--- the outer fence is to make the outer fence longer.
+---
+--- @param lines string[]
+--- @return integer  length of the longest run; 0 if none
+function M.max_fence_backtick_run(lines)
+  local max_run = 0
+  for _, line in ipairs(lines) do
+    local ticks = line:match("^%s*(`+)%s*$")
+    if ticks and #ticks > max_run then
+      max_run = #ticks
+    end
+  end
+  return max_run
+end
+
 --- Prefixed vim.notify wrapper.
 --- @param msg   string
 --- @param level? integer  vim.log.levels.*

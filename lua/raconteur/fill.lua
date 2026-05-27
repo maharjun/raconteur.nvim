@@ -39,17 +39,28 @@ function M.fill_lines(lines, root_dir)
       content_lines = { "-- [raconteur] " .. (err or "empty range") }
     end
 
-    -- Replace body between fences (0-indexed block lines → 1-indexed table).
-    local body_start = block.fence_open_line + 2  -- table index after opening fence
-    local body_end   = block.fence_close_line      -- table index before closing fence
+    -- Grow the outer fence past any pure-backtick line in the source so
+    -- the wrapping block stays intact under a CommonMark renderer.
+    local needed_ticks = math.max(
+      #block.fence_ticks,
+      utils.max_fence_backtick_run(content_lines) + 1
+    )
+    local fence_ticks = string.rep("`", needed_ticks)
+    local new_open  = block.fence_indent .. fence_ticks .. block.fence_info
+    local new_close = block.fence_indent .. fence_ticks
+
+    -- Rebuild the line table, replacing the fence region (1-indexed Lua
+    -- table; block fence_*_line are 0-indexed).
     local new_out = {}
-    for j = 1, block.fence_open_line + 1 do
+    for j = 1, block.fence_open_line do
       new_out[#new_out + 1] = out[j]
     end
+    new_out[#new_out + 1] = new_open
     for _, cl in ipairs(content_lines) do
       new_out[#new_out + 1] = cl
     end
-    for j = block.fence_close_line + 1, #out do
+    new_out[#new_out + 1] = new_close
+    for j = block.fence_close_line + 2, #out do
       new_out[#new_out + 1] = out[j]
     end
     out = new_out

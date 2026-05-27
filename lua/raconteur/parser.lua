@@ -67,6 +67,10 @@ function M.parse_lines(lines)
             blocks[#blocks + 1] = {
               fence_open_line  = i - 1, -- 0-indexed
               fence_close_line = j - 1, -- 0-indexed
+              fence_indent     = indent,
+              fence_ticks      = ticks,    -- original opening backtick run
+              fence_info       = info,     -- everything after the open ticks
+              fence_close_text = lines[j], -- exact original closing line
               lang             = lang,
               file             = file,
               lines_start      = lines_start,

@@ -25,6 +25,11 @@ local ns_id = vim.api.nvim_create_namespace("raconteur")
 ---
 --- IMPORTANT: call blocks bottom-to-top so line offsets stay valid.
 ---
+--- The outer fence is grown if the source contains a pure-backtick line
+--- long enough to close it.  CommonMark does not honour backslash escapes
+--- inside fenced code blocks, so a longer fence is the only way to keep
+--- inner triple-backticks from terminating the wrapping block.
+---
 --- @param bufnr integer
 --- @param block table   block descriptor from parser.parse()
 --- @return table|nil    block_state for later clear/navigation, or nil on skip
@@ -56,17 +61,30 @@ function M.render_block(bufnr, block)
     end
   end
 
-  -- Replace body between opening and closing fences.
-  -- body_start is the line right after the opening fence; body_end is the
-  -- closing fence line itself (exclusive end for nvim_buf_set_lines).
-  local body_start = block.fence_open_line + 1
-  local body_end   = block.fence_close_line
-  vim.api.nvim_buf_set_lines(bufnr, body_start, body_end, false, content_lines)
+  -- Grow the outer fence to one tick longer than the longest pure-backtick
+  -- line in the source; the existing fence stays as-is when the source has
+  -- no such line.
+  local needed_ticks = math.max(
+    #block.fence_ticks,
+    utils.max_fence_backtick_run(content_lines) + 1
+  )
+  local fence_ticks = string.rep("`", needed_ticks)
+  local new_open  = block.fence_indent .. fence_ticks .. block.fence_info
+  local new_close = block.fence_indent .. fence_ticks
 
-  -- The closing fence has moved; compute its new position.
-  local new_close_line = body_start + #content_lines
+  -- Replace the entire fence region (open line + body + close line).
+  local replacement = { new_open }
+  for _, l in ipairs(content_lines) do
+    replacement[#replacement + 1] = l
+  end
+  replacement[#replacement + 1] = new_close
 
-  -- Track the rendered region with extmarks.
+  vim.api.nvim_buf_set_lines(
+    bufnr, block.fence_open_line, block.fence_close_line + 1, false, replacement
+  )
+
+  local new_close_line = block.fence_open_line + 1 + #content_lines
+
   local open_extmark = vim.api.nvim_buf_set_extmark(
     bufnr, ns_id, block.fence_open_line, 0, {}
   )
@@ -90,15 +108,17 @@ function M.render_block(bufnr, block)
   end
 
   return {
-    file               = block.file,
-    lang               = block.lang,
-    lines_start        = block.lines_start,
-    lines_end          = block.lines_end,
-    original_body      = block.original_body,
-    open_extmark       = open_extmark,
-    close_extmark      = close_extmark,
+    file                = block.file,
+    lang                = block.lang,
+    lines_start         = block.lines_start,
+    lines_end           = block.lines_end,
+    original_body       = block.original_body,
+    fence_open_text     = block.fence_indent .. block.fence_ticks .. block.fence_info,
+    fence_close_text    = block.fence_close_text,
+    open_extmark        = open_extmark,
+    close_extmark       = close_extmark,
     rendered_line_count = #content_lines,
-    error              = err,
+    error               = err,
   }
 end
 
@@ -141,9 +161,13 @@ function M.clear_all(bufnr, block_states)
       local close_pos = vim.api.nvim_buf_get_extmark_by_id(bufnr, ns_id, bs.close_extmark, {})
 
       if open_pos[1] and close_pos[1] then
-        local body_start = open_pos[1] + 1
-        local body_end   = close_pos[1]
-        vim.api.nvim_buf_set_lines(bufnr, body_start, body_end, false, bs.original_body)
+        -- Restore the full fence region; render may have grown the fence.
+        local restore = { bs.fence_open_text }
+        for _, l in ipairs(bs.original_body) do
+          restore[#restore + 1] = l
+        end
+        restore[#restore + 1] = bs.fence_close_text
+        vim.api.nvim_buf_set_lines(bufnr, open_pos[1], close_pos[1] + 1, false, restore)
       end
     end
   end
