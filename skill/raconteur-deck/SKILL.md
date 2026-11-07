@@ -137,10 +137,20 @@ Input: `conversation <card> --upto <args.upto>`. Its messages are the ones the c
 in; later messages stay live.
 
 You decide the new digest and any card edits. Each digest entry is a question the conversation
-answered or a concept it uncovered, linked by `card_id` to the card that holds the answer. Fold
-an answer into the closest existing card by default, written the way card bodies are written;
-when a run of questions uncovered a concept of its own, write a new card for it. Earlier digest
-entries may be kept, merged or re-pointed.
+answered or a concept it uncovered, linked by `card_id` to the card that holds the answer.
+Earlier digest entries may be kept, merged or re-pointed.
+
+Each card is responsible for one concept, the one its title names. Before placing an answer,
+state that responsibility for the card you would edit, and decide each answer on its own:
+
+- An answer that corrects or completes the card's explanation of its own concept goes into that
+  card, written the way card bodies are written.
+- An answer about something else goes to the card responsible for that thing, existing or new.
+  This includes a definition of a term the card only uses, background, or the reasoning behind a
+  neighbouring piece of code. Link to that card from the original card with `card://` if a reader
+  needs the way there.
+- Never widen a card so that it can hold an answer. A card that reads as a mix of definitions,
+  side reasoning and its own concept has been muddied; split the extra parts out instead.
 
 Output, in this order, so the page never shows a digest that links a missing card:
 
