@@ -1,32 +1,43 @@
---- Markdown code-fence parser.
+--- Markdown code-fence parser: the one owner of the raconteur fence grammar.
 ---
---- Scans a buffer for fenced code blocks whose info-string contains a
---- `file=<path>` attribute and optional `lines=<start>-<end>` range.
+--- An opening fence is 3+ backticks followed by an info string of whitespace-separated tokens:
 ---
---- Complexity: single linear pass over buffer lines, O(n).
---- No treesitter dependency — the opening-fence regex is unambiguous in
---- Markdown and treesitter's info_string node would still need regex to
---- extract key=value pairs.  Treesitter *does* give us free syntax
---- highlighting inside fences, but that works automatically once the
---- content is placed between the backtick delimiters.
+---   [lang] file=<path> [lines=<a>-<b> | lines=<a>] [sha=<hex>]
+---
+--- The first token is `lang` unless it contains `=`. Every token containing `=` is an
+--- attribute `key=value`, so a key matches only at a whitespace boundary (`myfile=x` is not
+--- `file=`); a repeated key keeps its first value. A fence is a raconteur fence only when
+--- `file=` has a value; a `lines=` or `sha=` not in its form is ignored. `sha` is the
+--- lowercase-hex commit the body was copied from. Shared cases: test/fixtures/fence_info.json.
+---
+--- A linear pass over the lines without treesitter, since the info string needs splitting into
+--- attributes either way.
 local M = {}
 
 local utils = require("raconteur.utils")
 
---- Extract lang, file path, and line range from a fence info string.
---- Example: "lua file=src/auth.lua lines=10-25"
----   -> "lua", "src/auth.lua", 10, 25
+--- Split a fence info string into its parts; `file` is nil when it is not a raconteur fence.
+--- Example: "lua file=src/auth.lua lines=10-25 sha=3c72705" -> "lua", "src/auth.lua", 10, 25, "3c72705"
 --- @param info string
 --- @return string|nil lang
 --- @return string|nil file
 --- @return integer|nil lines_start  1-based
 --- @return integer|nil lines_end    1-based
+--- @return string|nil sha
 local function parse_info_string(info)
-  local lang = info:match("^(%S+)")
-  local file = info:match("file=(%S+)")
-  local lines_str = info:match("lines=(%S+)")
-  local lines_start, lines_end = utils.parse_line_range(lines_str)
-  return lang, file, lines_start, lines_end
+  local lang, attrs = nil, {}
+  for index, token in ipairs(vim.split(vim.trim(info), "%s+")) do
+    local key, value = token:match("^([^=]*)=(.*)$")
+    if key then
+      attrs[key] = attrs[key] or value
+    elseif index == 1 and token ~= "" then
+      lang = token
+    end
+  end
+  local file = attrs.file ~= "" and attrs.file or nil
+  local lines_start, lines_end = utils.parse_line_range(attrs.lines)
+  local sha = attrs.sha and attrs.sha:match("^[0-9a-f]+$")
+  return lang, file, lines_start, lines_end, sha
 end
 
 --- Parse all raconteur code blocks from a list of lines.
@@ -41,47 +52,43 @@ function M.parse_lines(lines)
   local i = 1
 
   while i <= #lines do
-    local line = lines[i]
-    -- Match opening fence: optional leading whitespace, 3+ backticks, info string.
-    -- The info string must be non-empty (at minimum "file=..." is required).
-    local indent, ticks, info = line:match("^(%s*)(```+)(.+)$")
+    -- Opening fence: optional leading whitespace, 3+ backticks, info string.
+    local indent, ticks, info = lines[i]:match("^(%s*)(```+)(.+)$")
+    local lang, file, lines_start, lines_end, sha
+    if info then lang, file, lines_start, lines_end, sha = parse_info_string(info) end
 
-    if indent and info and info:match("file=") then
-      local lang, file, lines_start, lines_end = parse_info_string(vim.trim(info))
+    if file then
+      -- Closing fence: same indent, at least as many backticks, nothing else on the line.
+      local close_pat = "^" .. indent .. string.rep("`", #ticks) .. "+%s*$"
+      local body_start = i + 1
+      local j = body_start
 
-      if file then
-        -- Build the pattern for the matching closing fence: same indent,
-        -- same number (or more) backticks, nothing else on the line.
-        local close_pat = "^" .. indent .. string.rep("`", #ticks) .. "+%s*$"
-        local body_start = i + 1
-        local j = body_start
-
-        while j <= #lines do
-          if lines[j]:match(close_pat) then
-            -- Collect the original body (may be empty or contain a fallback snapshot).
-            local original_body = {}
-            for k = body_start, j - 1 do
-              original_body[#original_body + 1] = lines[k]
-            end
-
-            blocks[#blocks + 1] = {
-              fence_open_line  = i - 1, -- 0-indexed
-              fence_close_line = j - 1, -- 0-indexed
-              fence_indent     = indent,
-              fence_ticks      = ticks,    -- original opening backtick run
-              fence_info       = info,     -- everything after the open ticks
-              fence_close_text = lines[j], -- exact original closing line
-              lang             = lang,
-              file             = file,
-              lines_start      = lines_start,
-              lines_end        = lines_end,
-              original_body    = original_body,
-            }
-            i = j -- advance past the closing fence
-            break
+      while j <= #lines do
+        if lines[j]:match(close_pat) then
+          -- Collect the original body (may be empty or contain a fallback snapshot).
+          local original_body = {}
+          for k = body_start, j - 1 do
+            original_body[#original_body + 1] = lines[k]
           end
-          j = j + 1
+
+          blocks[#blocks + 1] = {
+            fence_open_line  = i - 1, -- 0-indexed
+            fence_close_line = j - 1, -- 0-indexed
+            fence_indent     = indent,
+            fence_ticks      = ticks,    -- original opening backtick run
+            fence_info       = info,     -- everything after the open ticks
+            fence_close_text = lines[j], -- exact original closing line
+            lang             = lang,
+            file             = file,
+            lines_start      = lines_start,
+            lines_end        = lines_end,
+            sha              = sha,
+            original_body    = original_body,
+          }
+          i = j -- advance past the closing fence
+          break
         end
+        j = j + 1
       end
     end
     i = i + 1

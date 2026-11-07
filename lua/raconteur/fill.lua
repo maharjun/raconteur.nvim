@@ -8,16 +8,30 @@ local M = {}
 local parser = require("raconteur.parser")
 local utils  = require("raconteur.utils")
 
+--- Stamp `sha=<sha>` on a fence info string: in place of any sha it already carries, so the
+--- other tokens keep their order, or else at the end.
+--- @param info string
+--- @param sha  string  hex, so it is safe as a gsub replacement
+--- @return string
+local function stamp_sha(info, sha)
+  local stamped, count = (" " .. info):gsub("(%s)sha=%S*", "%1sha=" .. sha)
+  if count == 0 then stamped = stamped:gsub("%s+$", "") .. " sha=" .. sha end
+  return stamped:sub(2)
+end
+
 --- Fill all raconteur code blocks in a list of markdown lines.
 ---
---- Iterates blocks bottom-to-top (same as the renderer) so that line
+--- With `opts.sha`, each open fence line also records the commit its body was copied from; this
+--- is the only code that rewrites a fence line. Blocks are filled bottom-to-top so that line
 --- insertions don't shift earlier blocks.
 ---
 --- @param lines    string[]  markdown content
 --- @param root_dir string    git/project root for resolving file= paths
+--- @param opts?    { sha?: string }
 --- @return string[]          filled lines (new table, input is not mutated)
 --- @return table[]           block descriptors (with updated line numbers)
-function M.fill_lines(lines, root_dir)
+function M.fill_lines(lines, root_dir, opts)
+  local sha = opts and opts.sha
   local out = {}
   for _, l in ipairs(lines) do out[#out + 1] = l end
 
@@ -46,7 +60,8 @@ function M.fill_lines(lines, root_dir)
       utils.max_fence_backtick_run(content_lines) + 1
     )
     local fence_ticks = string.rep("`", needed_ticks)
-    local new_open  = block.fence_indent .. fence_ticks .. block.fence_info
+    local info = sha and stamp_sha(block.fence_info, sha) or block.fence_info
+    local new_open  = block.fence_indent .. fence_ticks .. info
     local new_close = block.fence_indent .. fence_ticks
 
     -- Rebuild the line table, replacing the fence region (1-indexed Lua
