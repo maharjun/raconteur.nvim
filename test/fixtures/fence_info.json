@@ -1,0 +1,18 @@
+[
+  { "info": "lua file=src/auth.lua lines=10-25",
+    "expect": { "lang": "lua", "file": "src/auth.lua", "start": 10, "end": 25, "sha": null } },
+  { "info": "lua file=src/auth.lua lines=7",
+    "expect": { "lang": "lua", "file": "src/auth.lua", "start": 7, "end": 7, "sha": null } },
+  { "info": "lua file=a.lua",
+    "expect": { "lang": "lua", "file": "a.lua", "start": null, "end": null, "sha": null } },
+  { "info": "file=a.lua lines=1-2",
+    "expect": { "lang": null, "file": "a.lua", "start": 1, "end": 2, "sha": null } },
+  { "info": "lua file=a.lua lines=1-2 sha=3c72705",
+    "expect": { "lang": "lua", "file": "a.lua", "start": 1, "end": 2, "sha": "3c72705" } },
+  { "info": "lua sha=abc123 file=a.lua",
+    "expect": { "lang": "lua", "file": "a.lua", "start": null, "end": null, "sha": "abc123" } },
+  { "info": "lua myfile=a.lua",
+    "expect": null },
+  { "info": "lua",
+    "expect": null }
+]
