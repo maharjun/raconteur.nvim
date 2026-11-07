@@ -13,8 +13,9 @@ there. When the user compresses a conversation, you turn it into a digest: a lis
 questions it answered and the concepts it uncovered, each linked to the card that holds the
 answer. So the deck grows into a knowledge base.
 
-`<skill>` is this skill's base directory. Everything the deck runs is in it, and it needs
-`node`, `nvim` and `git` on the PATH.
+`<skill>` is this skill's base directory; everything the deck runs is in it. It needs `node`,
+`nvim` and `git` on the PATH, and raconteur.nvim installed in the user's Neovim: `fill` starts
+Neovim the way the user does and uses their copy of the plugin.
 
 ## The deck folder
 
@@ -44,8 +45,8 @@ file, and holds exactly the fields listed here; `deck.mjs check` rejects anythin
 node <skill>/deck.mjs <deck> check                         # problems, or "deck is valid"
 node <skill>/deck.mjs <deck> pending                       # requests to handle, oldest first
 node <skill>/deck.mjs <deck> conversation <card> [--upto <message-id>]
-echo '{"worktree":"<worktree>","path":"<deck>/cards/<id>.json"}' |
-  nvim -l <skill>/relay.lua fill                           # copies code into the document
+echo '{"command":"fill","worktree":"<worktree>","path":"<deck>/cards/<id>.json"}' |
+  nvim --headless -n -i NONE -S <skill>/relay.lua          # copies code into the document
 node <skill>/server.mjs <deck> [port]                      # serves the page; prints its URL
 ```
 

@@ -1,9 +1,10 @@
 -- Protocol: the deck relay CLI (skill/raconteur-deck/relay.lua).
 --
 -- Interface under test: the commands the deck server and the agent run, called exactly as they
--- call them (a child `nvim -l` process with one JSON request on stdin), against real headless
--- Neovim servers. Every case is one row in CASES:
---   { description, command, request (encoded as stdin; `stdin` overrides it with raw text),
+-- call them (a child `nvim --headless -n -i NONE -S relay.lua` with one JSON request on stdin),
+-- against real headless Neovim servers. Every case is one row in CASES:
+--   { description, command, request (encoded as stdin with its command; `stdin` overrides it
+--     with raw text), config = "bare" for a Neovim setup without raconteur.nvim,
 --     expect = fields the JSON result must have, error = text the error must contain,
 --     opened = "server:file:line" after,
 --     card = deck document written to a fresh file whose path the runner puts in request.path,
@@ -11,12 +12,19 @@
 -- Every case also checks the exit code: 0 for ok results, 1 otherwise.
 --
 -- Fixture: a repo `main` with a second worktree `other`, a plain directory `plain`, and one
--- headless Neovim server in each.
+-- headless Neovim server in each. The relay runs with a Neovim config that puts this checkout on
+-- the runtimepath, standing in for the user's own install of the plugin.
 --
 -- Run: nvim --headless -u NONE -i NONE -n -l test/protocols/deck_relay.lua
 local root = vim.fn.getcwd()
 local script = root .. "/skill/raconteur-deck/relay.lua"
 local dir = vim.fn.tempname()
+
+--- Neovim setups the relay can start in: `plugin` has raconteur.nvim installed, `bare` has not.
+local configs = { plugin = dir .. "/config-plugin", bare = dir .. "/config-bare" }
+vim.fn.mkdir(configs.plugin .. "/nvim", "p")
+vim.fn.writefile({ "vim.opt.runtimepath:prepend(" .. vim.inspect(root) .. ")" }, configs.plugin .. "/nvim/init.lua")
+vim.fn.mkdir(configs.bare .. "/nvim", "p")
 
 local function sh(cwd, cmd)
   local r = vim.system(cmd, { cwd = cwd, text = true }):wait()
@@ -128,6 +136,9 @@ local CASES = {
     error = "usage:" },
   { "stdin is not JSON", "fill", nil, stdin = "worktree=" .. main,
     error = "usage:" },
+  { "Neovim setup without raconteur.nvim", "fill", { worktree = main }, config = "bare",
+    card = { title = "One pass", body_md = stale },
+    error = "raconteur.nvim is not installed", after = false },
 }
 
 -- Indented JSON, unlike vim.json.encode, so a rewrite of an unchanged document would show.
@@ -141,7 +152,7 @@ end
 
 local failed = 0
 for index, case in ipairs(CASES) do
-  local request, card_path, card_text = case[3], nil, nil
+  local request, card_path, card_text = vim.tbl_extend("force", case[3] or {}, { command = case[2] }), nil, nil
   if case.card then
     card_path = ("%s/cards/card-%d.json"):format(dir, index)
     card_text = pretty(case.card)
@@ -150,7 +161,9 @@ for index, case in ipairs(CASES) do
     request = vim.tbl_extend("force", request, { path = card_path })
   end
   local stdin = case.stdin or vim.json.encode(request)
-  local r = vim.system({ "nvim", "-l", script, case[2] }, { stdin = stdin, text = true }):wait()
+  local r = vim.system({ "nvim", "--headless", "-n", "-i", "NONE", "-S", script }, {
+    stdin = stdin, text = true, env = { XDG_CONFIG_HOME = configs[case.config or "plugin"] },
+  }):wait()
   local ok, result = pcall(vim.json.decode, r.stdout)
   local problems = {}
   if not ok then

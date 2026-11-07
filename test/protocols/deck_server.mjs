@@ -149,7 +149,14 @@ const CASES = [
     () => fs.writeFileSync(path.join(deck, "cards/c1.json"), "{\"title\": \"Car")],
 ];
 
-const server = spawn("node", [path.join(root, "skill/raconteur-deck/server.mjs"), deck, "0"]);
+// The relay finds raconteur.nvim through Neovim's config; this one puts the checkout on the
+// runtimepath in place of the user's own install.
+const config = path.join(tmp, "config");
+fs.mkdirSync(path.join(config, "nvim"), { recursive: true });
+fs.writeFileSync(path.join(config, "nvim", "init.lua"), `vim.opt.runtimepath:prepend(${JSON.stringify(root)})\n`);
+const server = spawn("node", [path.join(root, "skill/raconteur-deck/server.mjs"), deck, "0"], {
+  env: { ...process.env, XDG_CONFIG_HOME: config },
+});
 const url = await new Promise((resolve, reject) => {
   server.stdout.once("data", (d) => resolve(String(d).trim()));
   server.once("exit", () => reject(new Error("server exited")));

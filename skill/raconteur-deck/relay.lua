@@ -1,19 +1,16 @@
-#!/usr/bin/env -S nvim -l
 --- Deck relay: the bridge between the deck (its server and the agent) and the user's Neovim.
---- One JSON request on stdin, one JSON result on stdout ({ ok = true, ... } or
---- { ok = false, error = "<sentence for the user>" }), exit 0 when ok.
+--- It runs in a normal headless startup, so raconteur.nvim comes from the user's own Neovim
+--- setup, and a deck fills code exactly as the user's plugin renders it:
 ---
----   nvim -l relay.lua fill < {"worktree": ..., "path": <deck document>}
----   nvim -l relay.lua goto < {"server": ..., "worktree": ..., "file": ..., "line"?: ..., "heading"?: ..., "sha"?: ...}
+---   nvim --headless -n -i NONE -S relay.lua < <request>
 ---
---- `lua/` next to this file is raconteur.nvim's own Lua, so a deck fills code exactly as the
---- plugin renders it.
-local script_dir = debug.getinfo(1, "S").source:match("@?(.*/)") or "./"
-package.path = script_dir .. "lua/?.lua;" .. script_dir .. "lua/?/init.lua;" .. package.path
-
+--- The request is one JSON object naming its `command`; the result is one JSON object on
+--- stdout ({ ok = true, ... } or { ok = false, error = "<sentence for the user>" }), and Neovim
+--- always exits, 0 when ok:
+---
+---   {"command": "fill", "worktree": ..., "path": <deck document>}
+---   {"command": "goto", "server": ..., "worktree": ..., "file": ..., "line"?, "heading"?, "sha"?}
 local M = {}
-
-local fill = require("raconteur.fill")
 
 local function normalize(path)
   return (vim.fn.resolve(vim.fn.fnamemodify(path, ":p")):gsub("/$", ""))
@@ -126,7 +123,7 @@ function M.fill(worktree, path)
     return { ok = false, error = path .. " is not a deck document with a body_md." }
   end
   local lines = vim.split(doc.body_md, "\n", { plain = true })
-  local body = table.concat(fill.fill_lines(lines, root, { sha = head }), "\n")
+  local body = table.concat(require("raconteur.fill").fill_lines(lines, root, { sha = head }), "\n")
   if body == doc.body_md then return { ok = true, sha = head, changed = false } end
   doc.body_md = body
   local temp = path .. ".tmp"
@@ -142,20 +139,25 @@ local COMMANDS = {
   goto = { required = { "server", "worktree", "file" }, run = M.goto },
 }
 
-local USAGE = 'usage: nvim -l relay.lua fill|goto, with one JSON request on stdin: '
-  .. 'fill {"worktree","path"}; goto {"server","worktree","file","line"?,"heading"?,"sha"?}'
+local USAGE = 'usage: one JSON request on stdin: {"command":"fill","worktree","path"} or '
+  .. '{"command":"goto","server","worktree","file","line"?,"heading"?,"sha"?}'
 
-local function run(name, stdin)
-  local command = COMMANDS[name]
+local function run(stdin)
   -- A null optional field means the field is absent.
   local parsed, request = pcall(vim.json.decode, stdin, { luanil = { object = true } })
-  if not command or not parsed or type(request) ~= "table" then return { ok = false, error = USAGE } end
+  local command = parsed and type(request) == "table" and COMMANDS[request.command]
+  if not command then return { ok = false, error = USAGE } end
   for _, field in ipairs(command.required) do
     if type(request[field]) ~= "string" then return { ok = false, error = USAGE } end
+  end
+  if not pcall(require, "raconteur.fill") then
+    return { ok = false, error = "raconteur.nvim is not installed in this Neovim setup." }
   end
   return command.run(request)
 end
 
-local result = run((arg or {})[1], io.read("*a"))
+-- Any failure still prints a result and exits, so a headless Neovim never waits forever.
+local ran, result = xpcall(run, debug.traceback, io.read("*a"))
+if not ran then result = { ok = false, error = "The relay failed: " .. tostring(result) } end
 io.stdout:write(vim.json.encode(result) .. "\n")
 os.exit(result.ok and 0 or 1)

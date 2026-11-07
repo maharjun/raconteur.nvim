@@ -64,10 +64,11 @@ function createRequest(kind, cardId, arg, at) {
   return id;
 }
 
-/** Runs one relay command (relay.lua) with its JSON request; resolves to its JSON result. */
+/** Runs one relay command (relay.lua) with its JSON request; resolves to its JSON result. The
+ *  relay starts like the user's own Neovim, so it uses the raconteur.nvim they installed. */
 function relay(command, request) {
   return new Promise((resolve) => {
-    const child = spawn("nvim", ["-l", RELAY, command]);
+    const child = spawn("nvim", ["--headless", "-n", "-i", "NONE", "-S", RELAY]);
     let out = "";
     child.stdout.on("data", (d) => { out += d; });
     child.on("error", (e) => resolve({ ok: false, error: "Couldn't run Neovim: " + e.message }));
@@ -78,7 +79,7 @@ function relay(command, request) {
         resolve({ ok: false, error: "The relay printed no result." });
       }
     });
-    child.stdin.end(JSON.stringify(request));
+    child.stdin.end(JSON.stringify({ command, ...request }));
   });
 }
 
