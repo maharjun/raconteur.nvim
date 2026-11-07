@@ -1,0 +1,606 @@
+<title>Raconteur Deck</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap">
+<style>
+/* Layout: a slide rail beside one card at a time; the card's conversation sits under its prose. */
+:root {
+  --bg: #f3f4f7; --surface: #ffffff; --fg: #1a2029; --muted: #5d6675; --line: #dde1e8;
+  --accent: #2c55b8; --accent-soft: #e7ecf9; --code-bg: #f8f9fb; --gutter: #9aa3b2;
+  --ok: #1d7549; --err: #b42318; --warn: #8a5d00;
+  --hl-keyword: #8a3ab9; --hl-string: #1d7549; --hl-comment: #7c8594; --hl-number: #b0530c; --hl-title: #2c55b8;
+  --font-display: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Menlo, monospace;
+  --step--1: 0.8125rem; --step-0: 0.9375rem; --step-1: 1.125rem; --step-2: 1.5rem; --step-3: 2rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101319; --surface: #171b23; --fg: #e3e7ee; --muted: #98a2b3; --line: #2a303b;
+    --accent: #93acf3; --accent-soft: #1e2740; --code-bg: #12161d; --gutter: #5c6575;
+    --ok: #63d29c; --err: #ff8f85; --warn: #e3b35a;
+    --hl-keyword: #c79bf2; --hl-string: #8fd6a8; --hl-comment: #7a8496; --hl-number: #f0a56b; --hl-title: #93acf3;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101319; --surface: #171b23; --fg: #e3e7ee; --muted: #98a2b3; --line: #2a303b;
+  --accent: #93acf3; --accent-soft: #1e2740; --code-bg: #12161d; --gutter: #5c6575;
+  --ok: #63d29c; --err: #ff8f85; --warn: #e3b35a;
+  --hl-keyword: #c79bf2; --hl-string: #8fd6a8; --hl-comment: #7a8496; --hl-number: #f0a56b; --hl-title: #93acf3;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font: var(--step-0)/1.6 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 48px;
+}
+button, input, textarea { font: inherit; color: inherit; }
+button {
+  border: 1px solid var(--line); background: var(--surface); border-radius: 6px;
+  padding: 4px 10px; cursor: pointer; font-size: var(--step--1); white-space: nowrap;
+}
+button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+button:disabled { opacity: 0.45; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 500; }
+button.primary:hover:not(:disabled) { color: var(--surface); filter: brightness(1.08); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+a { color: var(--accent); text-underline-offset: 2px; }
+code, pre { font-family: var(--font-mono); font-size: 0.8125rem; }
+
+.shell { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+
+/* Deck header: title, then the worktree and Neovim server the deck is bound to. */
+.deck-head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px 24px; }
+.deck-title { font: 600 var(--step-2)/1.2 var(--font-display); margin: 0; text-wrap: balance; }
+.binding { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: var(--step--1); color: var(--muted); }
+.binding span, .binding label { display: inline-flex; gap: 6px; align-items: center; min-width: 0; }
+.binding b { font-weight: 500; color: var(--fg); font-family: var(--font-mono); font-size: 0.75rem; overflow-wrap: anywhere; }
+.binding input {
+  font-family: var(--font-mono); font-size: 0.75rem; padding: 2px 6px; width: 15rem; max-width: 60vw;
+  border: 1px solid var(--line); border-radius: 4px; background: var(--surface);
+}
+
+.layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 28px; align-items: start; }
+@media (max-width: 760px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* Slide rail: the deck's order is real, so cards are numbered. */
+.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); display: grid; gap: 2px; }
+.rail-label { font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px 10px; }
+.rail a {
+  display: grid; grid-template-columns: 1.6em 1fr; gap: 4px; padding: 6px 10px; border-radius: 6px;
+  color: var(--fg); text-decoration: none; font-size: var(--step--1); line-height: 1.4;
+}
+.rail a .n { color: var(--muted); font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 0.75rem; padding-top: 1px; }
+.rail a:hover { background: var(--accent-soft); }
+.rail a[aria-current="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+@media (max-width: 760px) {
+  .rail { position: static; display: flex; overflow-x: auto; gap: 4px; padding-bottom: 4px; }
+  .rail-label { display: none; }
+  .rail a { flex: 0 0 auto; max-width: 14rem; }
+}
+
+/* The card: one concept, its code, and its conversation. */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.card-inner { padding: 28px clamp(16px, 4vw, 40px) 32px; display: grid; gap: 22px; }
+.card-head { display: grid; gap: 6px; }
+.card-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.eyebrow { font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pager { display: flex; gap: 6px; align-items: center; }
+.card h1 { font: 600 var(--step-3)/1.15 var(--font-display); margin: 0; text-wrap: balance; }
+
+.prose { display: grid; gap: 14px; min-width: 0; }
+.prose > * { margin: 0; max-width: 68ch; }
+.prose > figure, .prose > pre, .prose > .codewrap { max-width: none; }
+.prose h2, .prose h3 { font: 600 var(--step-1)/1.3 var(--font-body); }
+.prose ul, .prose ol { padding-left: 1.3em; }
+.prose :not(pre) > code { background: var(--code-bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 0.8125em; }
+.prose blockquote { border-left: 3px solid var(--line); padding-left: 12px; color: var(--muted); }
+
+/* Code: plain fences and dynamic blocks share the same frame. */
+.codewrap { border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); overflow: hidden; min-width: 0; }
+.codewrap .scroll { overflow-x: auto; display: flex; }
+.codewrap pre { margin: 0; padding: 12px 14px; line-height: 1.55; }
+.codewrap .gutter {
+  color: var(--gutter); text-align: right; user-select: none; padding-right: 10px;
+  border-right: 1px solid var(--line); font-variant-numeric: tabular-nums;
+}
+.codewrap .src { flex: 1; }
+.block-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 7px 10px 7px 14px;
+  border-bottom: 1px solid var(--line); background: var(--surface); font-size: var(--step--1);
+}
+.block-bar .path { font-family: var(--font-mono); font-size: 0.75rem; font-weight: 500; overflow-wrap: anywhere; }
+.block-bar .copied { color: var(--muted); font-size: 0.75rem; margin-right: auto; }
+.block-status { padding: 7px 14px; border-top: 1px solid var(--line); font-size: var(--step--1); background: var(--surface); }
+.state-ok { color: var(--ok); } .state-err { color: var(--err); } .state-warn { color: var(--warn); } .state-wait { color: var(--muted); }
+.hljs-keyword, .hljs-built_in, .hljs-literal { color: var(--hl-keyword); }
+.hljs-string, .hljs-regexp { color: var(--hl-string); }
+.hljs-comment, .hljs-meta { color: var(--hl-comment); font-style: italic; }
+.hljs-number { color: var(--hl-number); }
+.hljs-title, .hljs-function .hljs-title, .hljs-section { color: var(--hl-title); }
+
+a.deck-link { text-decoration: none; border-bottom: 1px dashed currentColor; }
+a.deck-link::before { content: "\2192\00a0"; font-size: 0.85em; }
+
+/* Conversation: digest of compressed questions, then live messages, then the composer. */
+.talk { border-top: 1px solid var(--line); padding-top: 20px; display: grid; gap: 14px; }
+.talk-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.talk-head h2 { margin: 0; font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+.digest { display: grid; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.digest a {
+  display: grid; grid-template-columns: 5.5rem minmax(0, 1fr) auto; gap: 10px; align-items: baseline;
+  padding: 9px 12px; text-decoration: none; color: var(--fg); border-top: 1px solid var(--line);
+}
+.digest a:first-child { border-top: 0; }
+.digest a:hover { background: var(--accent-soft); }
+.digest .kind { font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.digest .kind.concept { color: var(--accent); }
+.digest .to { font-size: var(--step--1); color: var(--accent); white-space: nowrap; }
+@media (max-width: 520px) {
+  .digest a { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+}
+
+.messages { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+.msg { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
+.avatar {
+  width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 0.75rem; font-weight: 600; background: var(--accent-soft); color: var(--accent);
+}
+.msg.claude .avatar { background: var(--fg); color: var(--surface); font-family: var(--font-display); font-size: 0.875rem; }
+.msg-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: var(--step--1); }
+.msg-head b { font-weight: 600; }
+.msg-head time, .msg-head .tag { color: var(--muted); font-size: 0.75rem; }
+.msg-head .tag.state-err { color: var(--err); }
+.msg .prose { gap: 10px; }
+
+.composer { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.composer:focus-within { border-color: var(--accent); }
+.composer textarea {
+  display: block; width: 100%; min-height: 4.5rem; resize: vertical; border: 0; background: transparent;
+  padding: 10px 12px; outline: none; line-height: 1.5;
+}
+.composer-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 8px 8px 12px; }
+.hint { color: var(--muted); font-size: 0.75rem; }
+.notice { font-size: var(--step--1); margin: 0; }
+
+details.history { position: relative; }
+details.history summary {
+  list-style: none; cursor: pointer; border: 1px solid var(--line); background: var(--surface); border-radius: 6px;
+  padding: 4px 10px; font-size: var(--step--1);
+}
+details.history summary:hover, details.history[open] summary { border-color: var(--accent); color: var(--accent); }
+details.history summary::-webkit-details-marker { display: none; }
+.history-list {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 5; width: min(22rem, 80vw);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12); display: grid; gap: 2px;
+}
+.history-list button {
+  border: 0; text-align: left; white-space: normal; display: grid; gap: 1px; padding: 6px 8px; width: 100%;
+}
+.history-list button[aria-current="true"] { background: var(--accent-soft); color: var(--accent); }
+.history-list small { color: var(--muted); font-size: 0.6875rem; }
+
+.empty { padding: 48px clamp(16px, 4vw, 40px); display: grid; gap: 8px; max-width: 60ch; }
+.empty h1 { font: 600 var(--step-2)/1.2 var(--font-display); margin: 0; }
+.empty p { margin: 0; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) { .card { transition: border-color 0.2s; } }
+</style>
+
+<div class="shell">
+  <header class="deck-head" id="inbox-anchor">
+    <h1 class="deck-title" id="deck-title">Raconteur Deck</h1>
+    <div class="binding" id="binding" hidden>
+      <span>Worktree <b id="worktree"></b></span>
+      <span>Branch <b id="branch"></b></span>
+      <label for="server">Neovim <input id="server" spellcheck="false" autocomplete="off"></label>
+    </div>
+  </header>
+  <div class="layout">
+    <nav class="rail" id="rail" aria-label="Cards"></nav>
+    <main class="card" id="card">
+      <div class="empty" id="empty">
+        <h1>Loading the deck…</h1>
+        <p>Cards, code and conversations come from this deck's database.</p>
+      </div>
+      <div class="card-inner" id="card-inner" hidden>
+        <div class="card-head">
+          <div class="card-meta">
+            <span class="eyebrow" id="eyebrow"></span>
+            <div class="pager">
+              <button id="refresh" type="button">Refresh code</button>
+              <button id="prev" type="button" aria-label="Previous card">&larr;</button>
+              <button id="next" type="button" aria-label="Next card">&rarr;</button>
+            </div>
+          </div>
+          <h1 id="card-title"></h1>
+          <p class="notice" id="refresh-status" hidden></p>
+        </div>
+        <div class="prose" id="body"></div>
+        <section class="talk" aria-labelledby="talk-label">
+          <div class="talk-head">
+            <h2 id="talk-label">Conversation</h2>
+            <div class="tools">
+              <button id="undo" type="button">Undo compression</button>
+              <details class="history" id="history">
+                <summary>History</summary>
+                <div class="history-list" id="history-list"></div>
+              </details>
+              <button id="compress" type="button">Compress</button>
+            </div>
+          </div>
+          <div class="digest" id="digest" hidden></div>
+          <ol class="messages" id="messages"></ol>
+          <form class="composer" id="composer">
+            <label for="draft" class="hint" style="position:absolute;left:-9999px">Ask about this card</label>
+            <textarea id="draft" placeholder="Ask about this card. Ask Claude for a new card here too."></textarea>
+            <div class="composer-foot">
+              <span class="hint">Ctrl+Enter to send</span>
+              <button class="primary" id="send" type="submit">Send</button>
+            </div>
+          </form>
+          <p class="notice" id="notice" hidden></p>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="state.js"></script>
+<script>
+(function () {
+  const S = globalThis.DeckState;
+  const $ = (id) => document.getElementById(id);
+  const state = { meta: null, cards: {}, nodes: {}, messages: {}, actions: {} };
+  const drafts = {};
+  let current = null;
+  let store = null;      // { write(collection, id, data, merge), newId(collection) }
+  let comments = null;   // comments capability, or null
+  let preview = false;
+  let loaded = false;
+
+  // ---------- markdown ----------
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  function highlight(code, lang) {
+    try {
+      if (lang && window.hljs && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;
+    } catch (e) { /* fall through to plain text */ }
+    return esc(code);
+  }
+
+  function codeHtml(code, info) {
+    const block = S.parseFenceInfo(info);
+    const lang = block ? block.lang : (info || "").trim().split(/\s+/)[0];
+    const lines = code.replace(/\n$/, "").split("\n");
+    if (!block) {
+      return `<div class="codewrap"><div class="scroll"><pre class="src"><code>${highlight(code, lang)}</code></pre></div></div>`;
+    }
+    const first = block.start || 1;
+    const gutter = lines.map((_, i) => first + i).join("\n");
+    const range = block.start ? `${block.start}–${block.end}` : "whole file";
+    return `<figure class="codewrap" style="margin:0" data-file="${esc(block.file)}" data-line="${first}" data-sha="${esc(block.sha || "")}">
+      <figcaption class="block-bar">
+        <span class="path">${esc(block.file)}</span>
+        <span class="copied">${esc(range)}${block.sha ? ` · copied at ${esc(block.sha)}` : ""}</span>
+        <button type="button" data-goto>Open in Neovim</button>
+      </figcaption>
+      <div class="scroll"><pre class="gutter" aria-hidden="true">${gutter}</pre><pre class="src"><code>${highlight(lines.join("\n"), lang)}</code></pre></div>
+    </figure>`;
+  }
+
+  function linkHtml(href, title, text) {
+    const link = S.parseLink(href);
+    if (!link) return text;
+    if (link.kind === "web") return `<a href="${esc(link.href)}" target="_blank" rel="noopener">${text}</a>`;
+    if (link.kind === "card") return `<a class="deck-link" href="#c-${esc(link.id)}">${text}</a>`;
+    return `<a class="deck-link" href="#" data-walk="${esc(link.path)}" data-heading="${esc(link.heading || "")}">${text}</a>`;
+  }
+
+  marked.use({
+    gfm: true,
+    renderer: {
+      code: (code, info) => codeHtml(code, info),
+      link: (href, title, text) => linkHtml(href, title, text),
+      html: (html) => esc(html),
+    },
+  });
+  const md = (text) => marked.parse(text || "");
+
+  // ---------- derived state ----------
+  const order = () => ((state.meta && state.meta.order) || []).filter((id) => state.cards[id]);
+  const actionsFor = (cardId, kind) => Object.entries(state.actions)
+    .map(([id, a]) => ({ ...a, id }))
+    .filter((a) => a.card_id === cardId && a.kind === kind)
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  const when = (iso) => {
+    const d = new Date(iso);
+    return isNaN(d) ? "" : d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  };
+
+  // ---------- render ----------
+  function render() {
+    const meta = state.meta;
+    const ids = order();
+    $("deck-title").textContent = (meta && meta.title) || "Raconteur Deck";
+    $("binding").hidden = !meta;
+    if (meta) {
+      $("worktree").textContent = meta.worktree || "not set";
+      $("branch").textContent = meta.branch || "not set";
+      if (document.activeElement !== $("server")) $("server").value = meta.nvim_server || "";
+    }
+
+    if (!ids.length) {
+      $("card-inner").hidden = true;
+      $("empty").hidden = false;
+      $("empty").innerHTML = loaded
+        ? `<h1>No cards yet</h1><p>Ask Claude in your session to add cards to this deck. They appear here as soon as they are written.</p>`
+        : `<h1>Loading the deck…</h1><p>Cards, code and conversations come from this deck's database.</p>`;
+      $("rail").innerHTML = "";
+      return;
+    }
+    const fromHash = /^#c-(.+)$/.exec(location.hash);
+    if (fromHash && state.cards[fromHash[1]]) current = fromHash[1];
+    if (!state.cards[current]) current = ids[0];
+    const card = state.cards[current];
+    const index = ids.indexOf(current);
+
+    $("rail").innerHTML = `<p class="rail-label">Cards</p>` + ids.map((id, i) =>
+      `<a href="#c-${esc(id)}" aria-current="${id === current}"><span class="n">${i + 1}</span><span>${esc(state.cards[id].title || id)}</span></a>`
+    ).join("");
+
+    $("empty").hidden = true;
+    $("card-inner").hidden = false;
+    $("eyebrow").textContent = `Card ${index + 1} of ${ids.length}`;
+    $("card-title").textContent = card.title || current;
+    $("prev").disabled = index === 0;
+    $("next").disabled = index === ids.length - 1;
+    $("body").innerHTML = md(card.body_md);
+    $("refresh").hidden = !$("body").querySelector("[data-file]");
+    renderBlockStatus($("body"));
+    renderRefresh();
+    renderTalk();
+  }
+
+  function renderBlockStatus(root) {
+    const gotos = actionsFor(current, "goto");
+    root.querySelectorAll("figure[data-file]").forEach((fig) => {
+      const a = gotos.find((g) => g.args && g.args.file === fig.dataset.file && g.args.line === Number(fig.dataset.line));
+      if (!a) return;
+      const p = document.createElement("p");
+      p.className = "block-status";
+      if (a.status === "pending") { p.classList.add("state-wait"); p.textContent = "Waiting for Claude to open this in Neovim…"; }
+      else if (a.status === "error") { p.classList.add("state-err"); p.textContent = (a.result && a.result.error) || "Couldn't open this in Neovim."; }
+      else {
+        const r = a.result || {};
+        p.classList.add(r.changed_since_copy ? "state-warn" : "state-ok");
+        p.textContent = `Opened in Neovim at line ${r.line || fig.dataset.line}.` +
+          (r.changed_since_copy ? " The file has changed since this copy; use Refresh code to update it." : "");
+      }
+      fig.appendChild(p);
+    });
+  }
+
+  function renderRefresh() {
+    const a = actionsFor(current, "refresh")[0];
+    const el = $("refresh-status");
+    el.hidden = !a || a.status === "done" && !(a.result && a.result.note);
+    if (!a) return;
+    el.className = "notice " + (a.status === "pending" ? "state-wait" : a.status === "error" ? "state-err" : "state-ok");
+    el.textContent = a.status === "pending" ? "Waiting for Claude to refresh the code copies…"
+      : a.status === "error" ? ((a.result && a.result.error) || "Refresh failed.")
+      : (a.result && a.result.note) || "";
+    $("refresh").disabled = a.status === "pending";
+  }
+
+  function renderTalk() {
+    const conv = S.conversation(state, current);
+    const digest = $("digest");
+    digest.hidden = !conv.digest.length;
+    digest.innerHTML = conv.digest.map((e) => {
+      const target = state.cards[e.card_id];
+      return `<a href="#c-${esc(e.card_id)}"><span class="kind ${esc(e.kind)}">${e.kind === "concept" ? "Concept" : "Question"}</span>` +
+        `<span>${esc(e.text)}</span><span class="to">${esc(target ? target.title : e.card_id)} →</span></a>`;
+    }).join("");
+
+    $("messages").innerHTML = conv.messages.map((m) => {
+      const claude = m.role === "claude";
+      const tag = m.role === "user" && m.status === "pending" ? `<span class="tag">Waiting for Claude</span>`
+        : m.status === "error" ? `<span class="tag state-err">Claude couldn't answer: ${esc(m.error || "unknown error")}</span>` : "";
+      return `<li class="msg ${claude ? "claude" : "user"}">
+        <span class="avatar" aria-hidden="true">${claude ? "C" : "Y"}</span>
+        <div style="min-width:0;display:grid;gap:4px">
+          <div class="msg-head"><b>${claude ? "Claude" : "You"}</b><time>${esc(when(m.created_at))}</time>${tag}</div>
+          <div class="prose">${md(m.body_md)}</div>
+        </div></li>`;
+    }).join("");
+    renderBlockStatus($("messages"));
+
+    const compressing = actionsFor(current, "compress").find((a) => a.status === "pending");
+    $("compress").disabled = !conv.messages.length || !!compressing;
+    $("compress").textContent = compressing ? "Compressing…" : "Compress";
+    $("undo").disabled = S.undoTarget(state, current) === undefined;
+    renderHistory();
+
+    if ($("draft").dataset.card !== current) {
+      $("draft").value = drafts[current] || "";
+      $("draft").dataset.card = current;
+    }
+  }
+
+  function renderHistory() {
+    const head = state.cards[current].head || null;
+    const rows = [];
+    const walk = (parent, depth) => S.children(state, current, parent).forEach((n) => {
+      rows.push({ id: n.id, depth, label: `Compressed ${when(n.created_at)}`, detail: `${(n.digest || []).length} questions and concepts` });
+      walk(n.id, depth + 1);
+    });
+    walk(null, 1);
+    $("history").hidden = !rows.length;
+    $("history-list").innerHTML = [{ id: null, depth: 0, label: "Before any compression", detail: "Every message" }, ...rows]
+      .map((r) => `<button type="button" data-head="${r.id || ""}" aria-current="${(r.id || null) === head}" style="padding-left:${8 + r.depth * 14}px">` +
+        `<span>${esc(r.label)}</span><small>${esc(r.detail)}${(r.id || null) === head ? " · showing" : ""}</small></button>`).join("");
+  }
+
+  // ---------- writes ----------
+  function note(text, kind) {
+    const el = $("notice");
+    el.hidden = !text;
+    el.className = "notice " + (kind ? "state-" + kind : "");
+    el.textContent = text || "";
+  }
+
+  const WAKE_REASONS = {
+    writers_only: "Only editors of this deck can notify Claude.",
+    no_session: "No Claude session is watching this deck right now.",
+    off: "Notifying Claude is off in this view.",
+  };
+
+  // Tells the watching Claude session to look at the deck. Called first in a
+  // click handler, because the platform only sends from a recent gesture.
+  async function notifyClaude(what) {
+    if (preview) return note("Preview only: Claude is not notified.", "warn");
+    const later = " Claude will see it the next time it checks the deck.";
+    if (!comments) return note("Saved. This view can't notify Claude." + later, "warn");
+    const can = await comments.canSendToClaude().catch(() => "off");
+    if (can !== "available") return note("Saved. " + (WAKE_REASONS[can] || WAKE_REASONS.off) + later, "warn");
+    const text = `Deck "${(state.meta && state.meta.title) || "Raconteur Deck"}": ${what}. Read pending messages and actions from the deck database.`;
+    const thread = state.meta && state.meta.inbox_thread;
+    try {
+      if (thread) {
+        await comments.sendToClaude({ threadId: thread, text });
+      } else {
+        const res = await comments.sendToClaude({ anchor: await comments.anchorFor($("inbox-anchor")), text });
+        await store.write("deck", "meta", { inbox_thread: res.threadId }, true);
+      }
+      note("Claude was notified.", "ok");
+    } catch (e) {
+      const code = e && e.code;
+      const reason = code === "consent_required" ? "Allow this page to comment as you, then send again."
+        : code === "rate_limited" ? "Too many sends in a row; wait a moment."
+        : code === "forbidden" ? "Commenting from this page is off for you."
+        : "Notifying Claude failed (" + (code || "unknown") + ").";
+      note("Saved. " + reason + later, "warn");
+    }
+  }
+
+  async function addAction(kind, args, what) {
+    const id = store.newId("actions");
+    const wake = notifyClaude(what);
+    await store.write("actions", id, { kind, card_id: current, args, status: "pending", created_at: new Date().toISOString() });
+    await wake;
+  }
+
+  async function send() {
+    const text = $("draft").value.trim();
+    if (!text || !store) return;
+    const id = store.newId("messages");
+    const wake = notifyClaude(`new message on card "${state.cards[current].title}"`);
+    try {
+      await store.write("messages", id, { card_id: current, role: "user", body_md: text, status: "pending", created_at: new Date().toISOString() });
+      $("draft").value = ""; drafts[current] = "";
+    } catch (e) {
+      note("Your message wasn't saved: " + ((e && e.message) || "the deck database refused it") + ".", "err");
+    }
+    await wake;
+  }
+
+  // ---------- events ----------
+  $("composer").addEventListener("submit", (e) => { e.preventDefault(); send(); });
+  $("draft").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } });
+  $("draft").addEventListener("input", () => { drafts[current] = $("draft").value; });
+  $("prev").addEventListener("click", () => step(-1));
+  $("next").addEventListener("click", () => step(1));
+  $("refresh").addEventListener("click", () => addAction("refresh", {}, `refresh code on card "${state.cards[current].title}"`));
+  $("compress").addEventListener("click", () => {
+    const live = S.conversation(state, current).messages;
+    addAction("compress", { upto: live[live.length - 1].id }, `compress the conversation on card "${state.cards[current].title}"`);
+  });
+  $("undo").addEventListener("click", () => {
+    const target = S.undoTarget(state, current);
+    if (target !== undefined) store.write("cards", current, { head: target }, true);
+  });
+  $("history-list").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-head]");
+    if (!b) return;
+    store.write("cards", current, { head: b.dataset.head || null }, true);
+    $("history").open = false;
+  });
+  $("server").addEventListener("change", () => store && store.write("deck", "meta", { nvim_server: $("server").value.trim() }, true));
+  document.addEventListener("click", (e) => {
+    const goto = e.target.closest("[data-goto]");
+    if (goto) {
+      const fig = goto.closest("figure");
+      addAction("goto", { file: fig.dataset.file, line: Number(fig.dataset.line), sha: fig.dataset.sha || null }, `open ${fig.dataset.file} in Neovim`);
+      return;
+    }
+    const walk = e.target.closest("[data-walk]");
+    if (walk) {
+      e.preventDefault();
+      addAction("goto", { file: walk.dataset.walk, heading: walk.dataset.heading || null }, `open walkthrough ${walk.dataset.walk} in Neovim`);
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.target.closest("textarea, input")) return;
+    if (e.key === "ArrowLeft") step(-1);
+    if (e.key === "ArrowRight") step(1);
+  });
+  window.addEventListener("hashchange", render);
+
+  function step(delta) {
+    const ids = order();
+    const next = ids[ids.indexOf(current) + delta];
+    if (next) location.hash = "c-" + next;
+  }
+
+  // ---------- data ----------
+  function applySnapshot(collection, snap) {
+    state[collection] = {};
+    snap.docs.forEach((d) => { state[collection][d.id] = d.data(); });
+  }
+
+  async function boot() {
+    if (window.__DECK_PREVIEW__) {
+      preview = true;
+      Object.assign(state, JSON.parse(JSON.stringify(window.__DECK_PREVIEW__)));
+      let n = 0;
+      store = {
+        newId: (c) => `${c}-preview-${++n}`,
+        write: async (c, id, data, merge) => {
+          if (c === "deck") state.meta = { ...state.meta, ...data };
+          else state[c][id] = merge ? { ...state[c][id], ...data } : data;
+          render();
+        },
+      };
+      loaded = true;
+      return render();
+    }
+    if (!window.claude || !window.claude.use) { loaded = true; return render(); }
+    const db = await window.claude.use("db");
+    comments = await window.claude.use("comments");
+    if (!db) {
+      $("empty").innerHTML = "<h1>Sign in to open this deck</h1><p>The cards live in this deck's database, which needs a signed-in claude.ai view.</p>";
+      return;
+    }
+    store = {
+      newId: (c) => db.collection(c).doc().id,
+      write: (c, id, data, merge) => (merge ? db.doc(`${c}/${id}`).update(data) : db.doc(`${c}/${id}`).set(data)),
+    };
+    const slow = setTimeout(() => { if (!loaded) { $("empty").innerHTML = "<h1>The deck database isn't answering yet</h1><p>It keeps retrying. Check your connection if this stays.</p>"; } }, 10000);
+    const fail = (e) => note("The deck stopped updating: " + ((e && e.message) || "database error") + ". Reload to reconnect.", "err");
+    db.doc("deck/meta").onSnapshot((d) => { state.meta = d.exists ? d.data() : null; loaded = true; clearTimeout(slow); render(); }, fail);
+    ["cards", "nodes", "messages", "actions"].forEach((c) =>
+      db.collection(c).onSnapshot((snap) => { applySnapshot(c, snap); render(); }, fail));
+  }
+
+  boot();
+})();
+</script>
