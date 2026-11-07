@@ -2,6 +2,7 @@
 
 Each file tests one interface; its header names the interface and how to run it.
 
+- `deck_cli.mjs`: `deck/folder.mjs` and `deck/deck.mjs`, the deck folder and the agent's CLI.
 - `deck_model.mjs`: `deck/state.js`, the deck's data model and validity rules.
 - `deck_relay.lua`: `scripts/deck.lua`, the relay CLI against headless Neovim servers.
 - `deck_server.mjs`: `deck/server.mjs`, the page's routes.
