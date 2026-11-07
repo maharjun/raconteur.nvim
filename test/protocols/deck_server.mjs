@@ -36,6 +36,7 @@ git("add", ".");
 git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "fixture");
 const sha = git("rev-parse", "--short", "HEAD");
 const branch = git("rev-parse", "--abbrev-ref", "HEAD");
+const hash = "30239a616d8c"; // content_hash of a.lua's line 2, "return x"
 const BASE = {
   "meta.json": { title: "Fixture", worktree, order: ["c1", "c2"] },
   "cards/c1.json": { title: "Card one", body_md: "Why.\n\n```lua file=a.lua lines=2 sha=0000000\nstale\n```" },
@@ -66,8 +67,11 @@ const writes = (...files) => (reply, written) =>
 const refused = writes();
 
 const CASES = [
-  ["state is the deck plus the worktree's branch", "/api/state", null,
-    { "meta.title": "Fixture", "cards.c1.title": "Card one", settings: null, branch }, writes()],
+  ["state is the deck plus the worktree's branch and the hashes of the copied lines", "/api/state", null,
+    { "meta.title": "Fixture", "cards.c1.title": "Card one", settings: null, branch }, (reply, written) => {
+      writes()(reply, written);
+      assert.deepEqual(reply.code_hashes, { "a.lua:2-2": hash });
+    }],
 
   // Writes: the documents each route writes, and which wake the agent through inbox.log.
   ["ask writes the user message and its answer request, and wakes the agent", "/api/ask",
@@ -136,7 +140,7 @@ const CASES = [
     { ok: true, note: `Code copies updated to ${sha}.` }, (reply, written) => {
       writes("cards/c1.json")(reply, written);
       assert.equal(read("cards/c1.json").title, "Card one");
-      assert.ok(read("cards/c1.json").body_md.includes(`sha=${sha}\nreturn x\n`), "card body not refilled");
+      assert.ok(read("cards/c1.json").body_md.includes(`sha=${sha} hash=${hash}\nreturn x\n`), "card body not refilled");
     }],
   ["refresh of a current card writes nothing", "/api/refresh", { card_id: "c1" },
     { ok: true, note: `Code copies already match ${sha}.` }, writes()],

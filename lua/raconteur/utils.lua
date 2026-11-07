@@ -105,6 +105,14 @@ function M.max_fence_backtick_run(lines)
   return max_run
 end
 
+--- The `hash=` of a block's copied lines: the first 12 hex digits of the SHA-256 of the lines
+--- joined by "\n". skill/raconteur-deck/folder.mjs computes the same value.
+--- @param lines string[]
+--- @return string
+function M.content_hash(lines)
+  return vim.fn.sha256(table.concat(lines, "\n")):sub(1, 12)
+end
+
 --- Prefixed vim.notify wrapper.
 --- @param msg   string
 --- @param level? integer  vim.log.levels.*

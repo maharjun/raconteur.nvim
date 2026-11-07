@@ -44,6 +44,27 @@ const json = (run) => (dir) => {
   return { code, out: JSON.parse(out) };
 };
 
+// The deck folder doubles as its worktree. e35e7ae8597a is the hash of src.lua's lines 2-3, the
+// value test/protocols/deck_relay.lua expects fill to stamp; 000000000000 matches nothing.
+const inWorktree = (run) => (dir) => {
+  fs.writeFileSync(path.join(dir, "src.lua"), "local a = 1\nlocal b = 2\nlocal c = 3\n");
+  writeDoc(dir, "meta.json", { ...BASE["meta.json"], worktree: dir });
+  return run(dir);
+};
+const STALE = {
+  "cards/parser.json": { title: "Parser", body_md: [
+    "```lua file=src.lua lines=2-3 hash=e35e7ae8597a", "x", "```",
+    "```lua file=src.lua lines=1-2 hash=000000000000", "x", "```",
+    "```lua file=gone.lua hash=000000000000", "x", "```",
+    "```lua file=src.lua lines=1", "x", "```"].join("\n") },
+  "messages/m2.json": { ...BASE["messages/m2.json"], body_md: "```lua file=src.lua lines=2-3 hash=000000000000\nx\n```" },
+};
+const STALE_OUT = [
+  { doc: "cards/parser.json", card_id: "parser", file: "src.lua", lines: "1-2", hash: "000000000000", current: "a3c6f56a051f" },
+  { doc: "cards/parser.json", card_id: "parser", file: "gone.lua", lines: null, hash: "000000000000", current: null },
+  { doc: "messages/m2.json", card_id: "parser", file: "src.lua", lines: "2-3", hash: "000000000000", current: "e35e7ae8597a" },
+];
+
 const CASES = [
   // readDeck and writeDoc.
   ["readDeck reads every kind; absent singletons are null", {}, (dir) => {
@@ -88,11 +109,27 @@ const CASES = [
   // conversation.
   ["conversation: digest of the head, then later messages", {}, json(cli("conversation", "parser")),
     { code: 0, out: { card: "parser", title: "Parser", head: "n1",
-      digest: BASE["nodes/n1.json"].digest, messages: [{ id: "m3", ...BASE["messages/m3.json"] }] } }],
+      digest: BASE["nodes/n1.json"].digest, messages: [{ id: "m3", ...BASE["messages/m3.json"] }],
+      stale: [] } }],
   ["conversation --upto: the compress input", { "heads/parser.json": { node: null, at: T(9) } },
     json(cli("conversation", "parser", "--upto", "m2")),
     { code: 0, out: { card: "parser", title: "Parser", head: null, digest: [],
-      messages: [{ id: "m1", ...BASE["messages/m1.json"] }, { id: "m2", ...BASE["messages/m2.json"] }] } }],
+      messages: [{ id: "m1", ...BASE["messages/m1.json"] }, { id: "m2", ...BASE["messages/m2.json"] }],
+      stale: [] } }],
+  ["conversation: lists the card's out-of-date copies", STALE,
+    (dir) => inWorktree(json(cli("conversation", "parser")))(dir).out.stale, STALE_OUT],
+
+  // stale.
+  ["stale: copies whose lines changed or can't be read, per document", STALE,
+    inWorktree(json(cli("stale"))), { code: 0, out: STALE_OUT }],
+  ["stale: none when every copy matches", {}, inWorktree(json(cli("stale"))), { code: 0, out: [] }],
+  // a2bd1fff2786 is lua/raconteur/utils.lua content_hash({ "x\r", "é" }).
+  ["stale: hashes bytes as Lua does, carriage returns and UTF-8 included", {
+    "cards/parser.json": { title: "Parser", body_md: "```txt file=crlf.txt hash=a2bd1fff2786\nx\n```" },
+  }, inWorktree((dir) => {
+    fs.writeFileSync(path.join(dir, "crlf.txt"), "x\r\né\n");
+    return json(cli("stale"))(dir);
+  }), { code: 0, out: [] }],
   ["conversation: unknown card", {}, cli("conversation", "gone"), { code: 1, out: "no card gone\n" }],
   ["conversation --upto: not a message of the card", {}, cli("conversation", "parser", "--upto", "m9"),
     { code: 1, out: "m9 is not a message of card parser\n" }],

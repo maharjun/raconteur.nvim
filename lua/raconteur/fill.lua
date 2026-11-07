@@ -8,21 +8,24 @@ local M = {}
 local parser = require("raconteur.parser")
 local utils  = require("raconteur.utils")
 
---- Stamp `sha=<sha>` on a fence info string: in place of any sha it already carries, so the
---- other tokens keep their order, or else at the end.
---- @param info string
---- @param sha  string  hex, so it is safe as a gsub replacement
+--- Stamp `<key>=<value>` on a fence info string: in place of any value the key already has, so
+--- the other tokens keep their order, or else at the end.
+--- @param info  string
+--- @param key   string  a plain word, so it is safe in a pattern
+--- @param value string  hex, so it is safe as a gsub replacement
 --- @return string
-local function stamp_sha(info, sha)
-  local stamped, count = (" " .. info):gsub("(%s)sha=%S*", "%1sha=" .. sha)
-  if count == 0 then stamped = stamped:gsub("%s+$", "") .. " sha=" .. sha end
+local function stamp(info, key, value)
+  local stamped, count = (" " .. info):gsub("(%s)" .. key .. "=%S*", "%1" .. key .. "=" .. value)
+  if count == 0 then stamped = stamped:gsub("%s+$", "") .. " " .. key .. "=" .. value end
   return stamped:sub(2)
 end
 
 --- Fill all raconteur code blocks in a list of markdown lines.
 ---
---- With `opts.sha`, each open fence line also records the commit its body was copied from; this
---- is the only code that rewrites a fence line. Blocks are filled bottom-to-top so that line
+--- With `opts.sha`, each open fence line also records the commit its body was copied from and,
+--- when the source was read, the `hash=` of the copied lines; this is the only code that
+--- rewrites a fence line. A block whose source can't be read keeps its old hash, so it still
+--- reads as changed. Blocks are filled bottom-to-top so that line
 --- insertions don't shift earlier blocks.
 ---
 --- @param lines    string[]  markdown content
@@ -49,6 +52,13 @@ function M.fill_lines(lines, root_dir, opts)
       err = "file not found: " .. block.file
     end
 
+    local info = block.fence_info
+    if sha then
+      info = stamp(info, "sha", sha)
+      if content_lines and #content_lines > 0 then
+        info = stamp(info, "hash", utils.content_hash(content_lines))
+      end
+    end
     if not content_lines or #content_lines == 0 then
       content_lines = { "-- [raconteur] " .. (err or "empty range") }
     end
@@ -60,7 +70,6 @@ function M.fill_lines(lines, root_dir, opts)
       utils.max_fence_backtick_run(content_lines) + 1
     )
     local fence_ticks = string.rep("`", needed_ticks)
-    local info = sha and stamp_sha(block.fence_info, sha) or block.fence_info
     local new_open  = block.fence_indent .. fence_ticks .. info
     local new_close = block.fence_indent .. fence_ticks
 

@@ -3,10 +3,12 @@
 //   node deck.mjs <deck-dir> check                                print problems; exit 1 if any
 //   node deck.mjs <deck-dir> pending                              requests to serve, oldest first
 //   node deck.mjs <deck-dir> conversation <card> [--upto <id>]    a card's conversation
-import { readDeck } from "./folder.mjs";
+//   node deck.mjs <deck-dir> stale                                blocks copied from lines the
+//                                                                 worktree no longer holds
+import { codeHashes, readDeck } from "./folder.mjs";
 
 const S = globalThis.DeckState;
-const USAGE = "usage: node deck.mjs <deck-dir> check | pending | conversation <card> [--upto <message-id>]";
+const USAGE = "usage: node deck.mjs <deck-dir> check | pending | conversation <card> [--upto <message-id>] | stale";
 
 function fail(message) {
   console.error(message);
@@ -22,6 +24,8 @@ if (command === "check") {
   problems.forEach((p) => console.log(p));
   console.log(problems.length ? `${problems.length} problems` : "deck is valid");
   process.exit(problems.length ? 1 : 0);
+} else if (command === "stale" && !rest.length) {
+  console.log(JSON.stringify(S.outOfDateBlocks(state, codeHashes(state)), null, 2));
 } else if (command === "pending") {
   console.log(JSON.stringify(S.pendingRequests(state), null, 2));
 } else if (command === "conversation" && (rest.length === 1 || (rest.length === 3 && rest[1] === "--upto"))) {
@@ -32,7 +36,8 @@ if (command === "check") {
     fail(`${upto} is not a message of card ${cardId}`);
   }
   const { head, digest, messages } = S.conversation(state, cardId, { upto });
-  console.log(JSON.stringify({ card: cardId, title: card.title, head, digest, messages }, null, 2));
+  const stale = S.outOfDateBlocks(state, codeHashes(state)).filter((b) => b.card_id === cardId);
+  console.log(JSON.stringify({ card: cardId, title: card.title, head, digest, messages, stale }, null, 2));
 } else {
   fail(USAGE);
 }

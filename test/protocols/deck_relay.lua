@@ -73,14 +73,20 @@ end
 
 local stale = table.concat({
   "Why one pass?", "",
-  "```lua file=src.lua lines=2-3 sha=0000000", "stale copy", "```", "",
+  "```lua file=src.lua lines=2-3 sha=0000000 hash=000000000000", "stale copy", "```", "",
   "```lua", "-- plain block stays", "```",
 }, "\n")
+-- e35e7ae8597a is the hash of lines 2-3; test/protocols/deck_cli.mjs expects the same value.
 local filled = table.concat({
   "Why one pass?", "",
-  "```lua file=src.lua lines=2-3 sha=" .. sha, "local b = 2", "local c = 3", "```", "",
+  "```lua file=src.lua lines=2-3 sha=" .. sha .. " hash=e35e7ae8597a", "local b = 2", "local c = 3", "```", "",
   "```lua", "-- plain block stays", "```",
 }, "\n")
+
+-- A source that can't be read keeps its old hash, so the copy still reads as out of date.
+local unreadable = "```lua file=gone.lua sha=0000000 hash=000000000000\nold\n```"
+local unreadable_filled = "```lua file=gone.lua sha=" .. sha .. " hash=000000000000\n"
+  .. "-- [raconteur] file not found: gone.lua\n```"
 
 local function go(fields)
   return vim.tbl_extend("keep", fields, { server = servers.main, worktree = main })
@@ -123,6 +129,9 @@ local CASES = {
   { "fill: an up-to-date document is left byte-for-byte", "fill", { worktree = main },
     card = { title = "One pass", body_md = filled },
     expect = { ok = true, sha = sha, changed = false }, after = false },
+  { "fill: an unreadable source keeps its hash", "fill", { worktree = main },
+    card = { title = "One pass", body_md = unreadable },
+    expect = { ok = true, sha = sha, changed = true }, after = unreadable_filled },
   { "fill: directory outside git", "fill", { worktree = plain },
     card = { title = "One pass", body_md = stale },
     error = "is not a git worktree", after = false },

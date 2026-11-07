@@ -2,13 +2,15 @@
 ---
 --- An opening fence is 3+ backticks followed by an info string of whitespace-separated tokens:
 ---
----   [lang] file=<path> [lines=<a>-<b> | lines=<a>] [sha=<hex>]
+---   [lang] file=<path> [lines=<a>-<b> | lines=<a>] [sha=<hex>] [hash=<hex>]
 ---
 --- The first token is `lang` unless it contains `=`. Every token containing `=` is an
 --- attribute `key=value`, so a key matches only at a whitespace boundary (`myfile=x` is not
 --- `file=`); a repeated key keeps its first value. A fence is a raconteur fence only when
---- `file=` has a value; a `lines=` or `sha=` not in its form is ignored. `sha` is the
---- lowercase-hex commit the body was copied from. Shared cases: test/fixtures/fence_info.json.
+--- `file=` has a value; a `lines=`, `sha=` or `hash=` not in its form is ignored. `sha` is the
+--- lowercase-hex commit the body was copied from, and `hash` is utils.content_hash of the body
+--- as copied, so a source whose lines no longer hash to it has changed since. Shared cases:
+--- test/fixtures/fence_info.json.
 ---
 --- A linear pass over the lines without treesitter, since the info string needs splitting into
 --- attributes either way.
@@ -17,13 +19,15 @@ local M = {}
 local utils = require("raconteur.utils")
 
 --- Split a fence info string into its parts; `file` is nil when it is not a raconteur fence.
---- Example: "lua file=src/auth.lua lines=10-25 sha=3c72705" -> "lua", "src/auth.lua", 10, 25, "3c72705"
+--- Example: "lua file=src/auth.lua lines=10-25 sha=3c72705 hash=9f2c41d07a3b"
+---   -> "lua", "src/auth.lua", 10, 25, "3c72705", "9f2c41d07a3b"
 --- @param info string
 --- @return string|nil lang
 --- @return string|nil file
 --- @return integer|nil lines_start  1-based
 --- @return integer|nil lines_end    1-based
 --- @return string|nil sha
+--- @return string|nil hash
 local function parse_info_string(info)
   local lang, attrs = nil, {}
   for index, token in ipairs(vim.split(vim.trim(info), "%s+")) do
@@ -37,7 +41,8 @@ local function parse_info_string(info)
   local file = attrs.file ~= "" and attrs.file or nil
   local lines_start, lines_end = utils.parse_line_range(attrs.lines)
   local sha = attrs.sha and attrs.sha:match("^[0-9a-f]+$")
-  return lang, file, lines_start, lines_end, sha
+  local hash = attrs.hash and attrs.hash:match("^[0-9a-f]+$")
+  return lang, file, lines_start, lines_end, sha, hash
 end
 
 --- Parse all raconteur code blocks from a list of lines.
@@ -54,8 +59,8 @@ function M.parse_lines(lines)
   while i <= #lines do
     -- Opening fence: optional leading whitespace, 3+ backticks, info string.
     local indent, ticks, info = lines[i]:match("^(%s*)(```+)(.+)$")
-    local lang, file, lines_start, lines_end, sha
-    if info then lang, file, lines_start, lines_end, sha = parse_info_string(info) end
+    local lang, file, lines_start, lines_end, sha, hash
+    if info then lang, file, lines_start, lines_end, sha, hash = parse_info_string(info) end
 
     if file then
       -- Closing fence: same indent, at least as many backticks, nothing else on the line.
@@ -83,6 +88,7 @@ function M.parse_lines(lines)
             lines_start      = lines_start,
             lines_end        = lines_end,
             sha              = sha,
+            hash             = hash,
             original_body    = original_body,
           }
           i = j -- advance past the closing fence

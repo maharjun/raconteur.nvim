@@ -12,7 +12,7 @@
 :root {
   --bg: #f3f4f7; --surface: #ffffff; --fg: #1a2029; --muted: #5d6675; --line: #dde1e8;
   --accent: #2c55b8; --accent-soft: #e7ecf9; --code-bg: #f8f9fb; --gutter: #9aa3b2;
-  --ok: #1d7549; --err: #b42318; --warn: #8a5d00;
+  --ok: #1d7549; --err: #b42318; --warn: #8a5d00; --stale: #6a4ba3;
   --hl-keyword: #8a3ab9; --hl-string: #1d7549; --hl-comment: #7c8594; --hl-number: #b0530c; --hl-title: #2c55b8;
   --font-display: "Newsreader", "Iowan Old Style", Georgia, serif;
   --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
@@ -23,7 +23,7 @@
   :root:not([data-theme="light"]) {
     --bg: #101319; --surface: #171b23; --fg: #e3e7ee; --muted: #98a2b3; --line: #2a303b;
     --accent: #93acf3; --accent-soft: #1e2740; --code-bg: #12161d; --gutter: #5c6575;
-    --ok: #63d29c; --err: #ff8f85; --warn: #e3b35a;
+    --ok: #63d29c; --err: #ff8f85; --warn: #e3b35a; --stale: #b9a2ee;
     --hl-keyword: #c79bf2; --hl-string: #8fd6a8; --hl-comment: #7a8496; --hl-number: #f0a56b; --hl-title: #93acf3;
     color-scheme: dark;
   }
@@ -31,7 +31,7 @@
 :root[data-theme="dark"] {
   --bg: #101319; --surface: #171b23; --fg: #e3e7ee; --muted: #98a2b3; --line: #2a303b;
   --accent: #93acf3; --accent-soft: #1e2740; --code-bg: #12161d; --gutter: #5c6575;
-  --ok: #63d29c; --err: #ff8f85; --warn: #e3b35a;
+  --ok: #63d29c; --err: #ff8f85; --warn: #e3b35a; --stale: #b9a2ee;
   --hl-keyword: #c79bf2; --hl-string: #8fd6a8; --hl-comment: #7a8496; --hl-number: #f0a56b; --hl-title: #93acf3;
   color-scheme: dark;
 }
@@ -124,6 +124,7 @@ code, pre { font-family: var(--font-mono); font-size: 0.8125rem; }
 }
 .block-bar .path { font-family: var(--font-mono); font-size: 0.75rem; font-weight: 500; overflow-wrap: anywhere; }
 .block-bar .copied { color: var(--muted); font-size: 0.75rem; margin-right: auto; }
+.block-bar .stale { color: var(--stale); }
 .block-status { padding: 7px 14px; border-top: 1px solid var(--line); font-size: var(--step--1); background: var(--surface); }
 .state-ok { color: var(--ok); } .state-err { color: var(--err); } .state-warn { color: var(--warn); } .state-wait { color: var(--muted); }
 .hljs-keyword, .hljs-built_in, .hljs-literal { color: var(--hl-keyword); }
@@ -277,7 +278,7 @@ details.history summary::-webkit-details-marker { display: none; }
   const $ = (id) => document.getElementById(id);
   const OFFLINE = "The deck server isn't answering. Ask Claude to start it again.";
   // An empty deck until the server's first reply.
-  let state = Object.fromEntries([...S.SINGLETONS.map((k) => [k, null]), ...S.COLLECTIONS.map((k) => [k, {}]), ["branch", null]]);
+  let state = Object.fromEntries([...S.SINGLETONS.map((k) => [k, null]), ...S.COLLECTIONS.map((k) => [k, {}]), ["branch", null], ["code_hashes", {}]]);
   const drafts = {};
   const blockStatus = {};  // "<file>:<line>" -> { kind, text } from the last "Open in Neovim"
   const refreshNotes = {}; // card id -> { kind, text } from the last "Refresh code"
@@ -312,7 +313,8 @@ details.history summary::-webkit-details-marker { display: none; }
     return `<figure class="codewrap" style="margin:0" data-file="${esc(block.file)}" data-line="${first}" data-sha="${esc(block.sha || "")}">
       <figcaption class="block-bar">
         <span class="path">${esc(block.file)}</span>
-        <span class="copied">${esc(range)}${block.sha ? ` · copied at ${esc(block.sha)}` : ""}</span>
+        <span class="copied">${esc(range)}${block.sha ? ` · copied at ${esc(block.sha)}` : ""}${S.isOutOfDate(block, state.code_hashes)
+          ? ` · <span class="stale" title="These lines have changed in the worktree since they were copied. Refresh code copies them again.">Contents may be out of date</span>` : ""}</span>
         <button type="button" data-goto>Open in Neovim</button>
       </figcaption>
       <div class="scroll"><pre class="gutter" aria-hidden="true">${lines.map((_, i) => first + i).join("\n")}</pre><pre class="src"><code>${highlight(lines.join("\n"), lang)}</code></pre></div>

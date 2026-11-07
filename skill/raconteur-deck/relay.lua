@@ -126,7 +126,7 @@ function M.goto(request)
 end
 
 --- Fill every dynamic block in the `body_md` of the deck document at `path` with the worktree's
---- current lines, stamped with the short HEAD. The document is rewritten whole (temp file and
+--- current lines, stamped with the short HEAD and the hash of the copied lines. The document is rewritten whole (temp file and
 --- rename) only when its body changed, so an unchanged document keeps its bytes.
 --- @return table { ok, sha, changed } or { ok = false, error }
 function M.fill(worktree, path)

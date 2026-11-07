@@ -21,6 +21,9 @@ local config = require("raconteur.config")
 
 local ns_id = vim.api.nvim_create_namespace("raconteur")
 
+-- The note on a block whose source no longer matches its `hash=`; calm rather than a warning.
+vim.api.nvim_set_hl(0, "RaconteurStale", { link = "DiagnosticInfo", default = true })
+
 --- Render a single block by replacing the fence body with source content.
 ---
 --- IMPORTANT: call blocks bottom-to-top so line offsets stay valid.
@@ -60,6 +63,9 @@ function M.render_block(bufnr, block)
       content_lines = { "-- [raconteur] empty range" }
     end
   end
+  -- The block was written about its `hash=` contents; a source that no longer matches them may
+  -- have outdated the prose around it. A source that can't be read is reported as above.
+  local stale = block.hash ~= nil and not err and utils.content_hash(content_lines) ~= block.hash
 
   -- Grow the outer fence to one tick longer than the longest pure-backtick
   -- line in the source; the existing fence stays as-is when the source has
@@ -103,6 +109,12 @@ function M.render_block(bufnr, block)
     end
     vim.api.nvim_buf_set_extmark(bufnr, ns_id, block.fence_open_line, 0, {
       virt_text     = { { "  " .. label, "Comment" } },
+      virt_text_pos = "eol",
+    })
+  end
+  if stale then
+    vim.api.nvim_buf_set_extmark(bufnr, ns_id, block.fence_open_line, 0, {
+      virt_text     = { { "  Contents may be out of date", "RaconteurStale" } },
       virt_text_pos = "eol",
     })
   end

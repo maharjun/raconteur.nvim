@@ -8,7 +8,7 @@ import http from "node:http";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { readDeck, writeDoc } from "./folder.mjs";
+import { codeHashes, readDeck, writeDoc } from "./folder.mjs";
 
 const S = globalThis.DeckState;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -83,13 +83,15 @@ function relay(command, request) {
 }
 
 /** The deck as the page draws it, plus the worktree's current branch (null when git can't
- *  say), read live so it is never stale. */
+ *  say) and the hashes of the lines its blocks copy (`code_hashes`), read live so they are
+ *  never stale. */
 function getState() {
   const state = readState();
   const worktree = state.meta && state.meta.worktree;
   const git = worktree
     && spawnSync("git", ["-C", worktree, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" });
-  return { ...state, branch: git && git.status === 0 ? git.stdout.trim() : null };
+  const branch = git && git.status === 0 ? git.stdout.trim() : null;
+  return { ...state, branch, code_hashes: codeHashes(state) };
 }
 
 /** Saves the user's question and asks the agent to answer it; the message is written before

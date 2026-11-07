@@ -1,9 +1,10 @@
 // Reads and writes a deck folder: one JSON file per document, at DeckState.docPath.
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import "./state.js";
 
-const { SINGLETONS, COLLECTIONS, docPath } = globalThis.DeckState;
+const { SINGLETONS, COLLECTIONS, docPath, codeDocs, dynamicBlocks, blockKey } = globalThis.DeckState;
 
 /** Reads every document of a deck folder into the DeckState shape. A file that fails to parse is
  *  served from its copy in `lastGood` (a Map the caller keeps across reads); with no copy it is
@@ -40,6 +41,40 @@ export function readDeck(dir, { lastGood } = {}) {
     }
   }
   return state;
+}
+
+/** The CodeHashes of every block range the deck copies, read from its worktree now. A range's
+ *  hash is lua/raconteur/utils.lua content_hash of its lines, which are split on "\n" alone and
+ *  hashed as bytes (latin1 round-trips them), so the two always agree. */
+export function codeHashes(state) {
+  const worktree = state.meta && state.meta.worktree;
+  const files = new Map();
+  const linesOf = (file) => {
+    if (!files.has(file)) {
+      let lines = null;
+      try {
+        const text = fs.readFileSync(path.join(worktree, file), "latin1");
+        lines = text.split("\n");
+        if (text.endsWith("\n")) lines.pop();
+      } catch {
+        // Missing or unreadable: no lines, so no hash.
+      }
+      files.set(file, lines);
+    }
+    return files.get(file);
+  };
+  const hashes = {};
+  if (typeof worktree !== "string") return hashes;
+  for (const { body_md } of codeDocs(state)) {
+    for (const block of dynamicBlocks(body_md)) {
+      const all = linesOf(block.file);
+      const lines = all && (block.start ? all.slice(block.start - 1, block.end) : all);
+      hashes[blockKey(block)] = lines && lines.length
+        ? crypto.createHash("sha256").update(lines.join("\n"), "latin1").digest("hex").slice(0, 12)
+        : null;
+    }
+  }
+  return hashes;
 }
 
 /** Writes one whole document through a temp file and a rename, so a reader never sees it half

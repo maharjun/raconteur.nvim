@@ -64,15 +64,38 @@ const chose = (node, second) => edited((s) => { s.heads.parser = { node, at: T(s
 
 const ids = (docs) => docs.map((d) => d.id);
 
+const block = (attrs) => S.parseFenceInfo(`lua file=a.lua lines=2-3 ${attrs}`);
+const BLOCKS_MD = [
+  "````lua file=a.lua lines=2-3 sha=1 hash=aaa", "```", "````", "",
+  "```lua", "plain", "```", "", "```md file=b.lua", "```",
+].join("\n");
+
 const CASES = [
   // parseFenceInfo: which fences are dynamic blocks, and what they point at.
   ...FENCES.map(({ info, expect }) => ["parseFenceInfo", `shared case "${info}"`, [info], expect]),
   ["parseFenceInfo", "empty info is a plain fence", [""], null],
   ["parseFenceInfo", "malformed range and sha are absent", ["lua file=a.lua lines=x sha=XYZ"],
-    { lang: "lua", file: "a.lua", start: null, end: null, sha: null }],
+    { lang: "lua", file: "a.lua", start: null, end: null, sha: null, hash: null }],
   ["parseFenceInfo", "the first token of a key decides", ["lua file=a.lua lines=x lines=1-2 file=b.lua"],
-    { lang: "lua", file: "a.lua", start: null, end: null, sha: null }],
+    { lang: "lua", file: "a.lua", start: null, end: null, sha: null, hash: null }],
   ["parseFenceInfo", "an empty file= is a plain fence", ["lua file= file=a.lua"], null],
+
+  // dynamicBlocks, blockKey, isOutOfDate, outOfDateBlocks: which copies no longer match.
+  ["dynamicBlocks", "dynamic blocks only, a longer fence holding a shorter one", [BLOCKS_MD],
+    ["a.lua:2-3", "b.lua"]],
+  ["dynamicBlocks", "an unclosed fence is not a block", ["```lua file=a.lua\nx"], []],
+  ["isOutOfDate", "the range now hashes to something else", [block("hash=aaa"), { "a.lua:2-3": "bbb" }], true],
+  ["isOutOfDate", "the range can't be read", [block("hash=aaa"), { "a.lua:2-3": null }], true],
+  ["isOutOfDate", "the range still hashes to its hash", [block("hash=aaa"), { "a.lua:2-3": "aaa" }], false],
+  ["isOutOfDate", "a block without a hash can't tell", [block(""), { "a.lua:2-3": "bbb" }], false],
+  ["isOutOfDate", "no current hash for the range yet", [block("hash=aaa"), {}], false],
+  ["outOfDateBlocks", "per document, cards then messages", [edited((s) => {
+    s.cards.fill.body_md = "```lua file=a.lua lines=2-3 hash=aaa\nx\n```";
+    s.messages.m2.body_md = "```lua file=b.lua sha=1 hash=ccc\nx\n```\n```lua file=a.lua lines=2-3 hash=bbb\nx\n```";
+  }), { "a.lua:2-3": "bbb", "b.lua": null }], [
+    { doc: "cards/fill.json", card_id: "fill", file: "a.lua", lines: "2-3", hash: "aaa", current: "bbb" },
+    { doc: "messages/m2.json", card_id: "parser", file: "b.lua", lines: null, hash: "ccc", current: null },
+  ]],
 
   // parseLink: the deck's two link kinds, web links, and everything refused.
   ["parseLink", "card link", ["card://fill"], { kind: "card", id: "fill" }],
@@ -200,6 +223,7 @@ const REDUCE = {
   conversation: (r) => ({ head: r.head, digest: r.digest.map((e) => e.text), messages: ids(r.messages) }),
   children: ids,
   pendingRequests: ids,
+  dynamicBlocks: (blocks) => blocks.map(S.blockKey),
 };
 
 let failed = 0;

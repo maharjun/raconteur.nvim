@@ -3,7 +3,7 @@
 -- Interface under test: parser.parse_lines on one fence whose open line carries the case's info
 -- string. Every case is one row in CASES, read from test/fixtures/fence_info.json, which
 -- test/protocols/deck_model.mjs runs through skill/raconteur-deck/state.js too:
---   { info, expect = { lang, file, start, end, sha } or null when it is not a raconteur fence }
+--   { info, expect = { lang, file, start, end, sha, hash } or null when it is not a raconteur fence }
 -- A JSON null field means the block's field is nil.
 --
 -- Run: nvim --headless -u NONE -i NONE -n -l test/protocols/fence_info.lua
@@ -13,7 +13,7 @@ package.path = root .. "/lua/?.lua;" .. root .. "/lua/?/init.lua;" .. package.pa
 local parser = require("raconteur.parser")
 local CASES = vim.json.decode(table.concat(vim.fn.readfile(root .. "/test/fixtures/fence_info.json"), "\n"))
 
-local FIELDS = { lang = "lang", file = "file", start = "lines_start", ["end"] = "lines_end", sha = "sha" }
+local FIELDS = { lang = "lang", file = "file", start = "lines_start", ["end"] = "lines_end", sha = "sha", hash = "hash" }
 
 local failed = 0
 for _, case in ipairs(CASES) do

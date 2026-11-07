@@ -59,6 +59,18 @@
    * @property {Object<string, Request>} requests
    * @property {Object<string, Result>} results
    * @property {string[]} [unreadable]  Files readDeck could not parse and had no copy of.
+   *
+   * @typedef {Object} Block  A dynamic block's fence info, as parseFenceInfo reads it.
+   * @property {string|null} lang
+   * @property {string} file
+   * @property {number|null} start
+   * @property {number|null} end
+   * @property {string|null} sha  Commit the body was copied from.
+   * @property {string|null} hash  Hash of the body as copied (lua/raconteur/utils.lua
+   *   content_hash), stamped by `fill`.
+   *
+   * @typedef {Object<string, string|null>} CodeHashes  Hash of each block range's current
+   *   lines in the worktree, by blockKey; null when the lines can't be read.
    */
 
   const ID = /^[A-Za-z0-9_-]{1,100}$/;
@@ -122,7 +134,8 @@
   }
 
   /** Reads a dynamic block's fence info: an optional first-token language (absent when that
-   *  token is an attribute), then `file=` (required), `lines=a-b` or `lines=a`, and `sha=`.
+   *  token is an attribute), then `file=` (required), `lines=a-b` or `lines=a`, `sha=` and
+   *  `hash=`.
    *  Attributes are whole whitespace-separated tokens and the first token of a key decides, so
    *  a malformed value reads as absent; returns null for any other fence. Mirrors
    *  lua/raconteur/parser.lua through test/fixtures/fence_info.json. */
@@ -136,13 +149,66 @@
     if (!file) return null;
     const lines = /^(\d+)(?:-(\d+))?$/.exec(attr("lines"));
     const sha = /^[0-9a-f]+$/.exec(attr("sha"));
+    const hash = /^[0-9a-f]+$/.exec(attr("hash"));
     return {
       lang: tokens[0].includes("=") ? null : tokens[0],
       file,
       start: lines ? Number(lines[1]) : null,
       end: lines ? Number(lines[2] || lines[1]) : null,
       sha: sha ? sha[0] : null,
+      hash: hash ? hash[0] : null,
     };
+  }
+
+  /** The dynamic blocks of a markdown body, top to bottom: an open fence whose info is a
+   *  dynamic block's, up to the next line of at least as many backticks at the same indent.
+   *  The same pass as lua/raconteur/parser.lua. */
+  function dynamicBlocks(markdown) {
+    const lines = (markdown || "").split("\n");
+    const blocks = [];
+    for (let i = 0; i < lines.length; i++) {
+      const open = /^(\s*)(`{3,})(.+)$/.exec(lines[i]);
+      const block = open && parseFenceInfo(open[3]);
+      if (!block) continue;
+      const close = new RegExp(`^${open[1]}\`{${open[2].length},}\\s*$`);
+      const end = lines.findIndex((line, j) => j > i && close.test(line));
+      if (end === -1) continue;
+      blocks.push(block);
+      i = end;
+    }
+    return blocks;
+  }
+
+  /** Names a block's source range, the key of CodeHashes. */
+  function blockKey(block) {
+    return block.start ? `${block.file}:${block.start}-${block.end}` : block.file;
+  }
+
+  /** Whether a block was copied from lines the worktree no longer holds: it has a `hash=` and
+   *  the range's current lines hash to something else, or can't be read. A block without a
+   *  hash can't tell, so it is never out of date. */
+  function isOutOfDate(block, hashes) {
+    const key = blockKey(block);
+    return block.hash !== null && Object.hasOwn(hashes || {}, key) && hashes[key] !== block.hash;
+  }
+
+  /** The documents a deck copies code into: every card, then every message, as
+   *  {doc, card_id, body_md}. */
+  function codeDocs(state) {
+    return [
+      ...withIds(state.cards).map((c) => ({ doc: docPath("cards", c.id), card_id: c.id, body_md: c.body_md })),
+      ...withIds(state.messages).map((m) => ({ doc: docPath("messages", m.id), card_id: m.card_id, body_md: m.body_md })),
+    ];
+  }
+
+  /** Every out-of-date block, per document, for the agent to decide whether to refill:
+   *  {doc, card_id, file, lines, hash, current} with `current` the hash the lines have now. */
+  function outOfDateBlocks(state, hashes) {
+    return codeDocs(state).flatMap(({ doc, card_id, body_md }) =>
+      dynamicBlocks(body_md).filter((b) => isOutOfDate(b, hashes)).map((b) => ({
+        doc, card_id, file: b.file, lines: b.start ? `${b.start}-${b.end}` : null,
+        hash: b.hash, current: hashes[blockKey(b)],
+      })));
   }
 
   /** card://<id> and walkthrough://<path>#<heading> are the deck's own links; http(s) links
@@ -376,7 +442,7 @@
 
   globalThis.DeckState = {
     SCHEMA, COLLECTIONS, SINGLETONS, ID, DEFAULT_NVIM_SERVER, REQUEST_ARG,
-    docPath, parseFenceInfo, parseLink, head, conversation, undoTarget, children,
+    docPath, parseFenceInfo, dynamicBlocks, blockKey, isOutOfDate, codeDocs, outOfDateBlocks, parseLink, head, conversation, undoTarget, children,
     pendingRequests, requestStatus, answerStatus, compressStatus, checkDeck,
   };
 })();
