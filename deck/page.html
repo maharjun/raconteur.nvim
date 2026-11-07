@@ -160,8 +160,8 @@ a.deck-link::before { content: "\2192\00a0"; font-size: 0.85em; }
 .msg.claude .avatar { background: var(--fg); color: var(--surface); font-family: var(--font-display); font-size: 0.875rem; }
 .msg-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: var(--step--1); }
 .msg-head b { font-weight: 600; }
-.msg-head time, .msg-head .tag { color: var(--muted); font-size: 0.75rem; }
-.msg-head .tag.state-err { color: var(--err); }
+.msg-head time, .tag { color: var(--muted); font-size: 0.75rem; }
+.tag.state-err { color: var(--err); }
 .msg .prose { gap: 10px; }
 
 .composer { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
@@ -213,7 +213,7 @@ details.history summary::-webkit-details-marker { display: none; }
     <main class="card" id="card">
       <div class="empty" id="empty">
         <h1>Loading the deck…</h1>
-        <p>Cards, code and conversations come from this deck's database.</p>
+        <p>Cards, code and conversations come from the deck folder.</p>
       </div>
       <div class="card-inner" id="card-inner" hidden>
         <div class="card-head">
@@ -238,6 +238,7 @@ details.history summary::-webkit-details-marker { display: none; }
                 <summary>History</summary>
                 <div class="history-list" id="history-list"></div>
               </details>
+              <span id="compress-status" hidden></span>
               <button id="compress" type="button">Compress</button>
             </div>
           </div>
@@ -265,7 +266,9 @@ details.history summary::-webkit-details-marker { display: none; }
 (function () {
   const S = globalThis.DeckState;
   const $ = (id) => document.getElementById(id);
-  const state = { meta: null, cards: {}, nodes: {}, messages: {}, actions: {} };
+  const OFFLINE = "The deck server isn't answering. Start it again with node deck/server.mjs <deck folder>.";
+  // An empty deck until the server's first reply.
+  let state = Object.fromEntries([...S.SINGLETONS.map((k) => [k, null]), ...S.COLLECTIONS.map((k) => [k, {}]), ["branch", null]]);
   const drafts = {};
   const blockStatus = {};  // "<file>:<line>" -> { kind, text } from the last "Open in Neovim"
   const refreshNotes = {}; // card id -> { kind, text } from the last "Refresh code"
@@ -326,8 +329,13 @@ details.history summary::-webkit-details-marker { display: none; }
     const d = new Date(iso);
     return isNaN(d) ? "" : d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   };
-  const pendingCompress = () => Object.values(state.actions)
-    .some((a) => a.card_id === current && a.kind === "compress" && a.status === "pending");
+  /** How the page shows a request the agent has not finished, for answers and compressions
+   *  alike: waiting, or failed with the agent's sentence; nothing once done. */
+  function statusTag(status, failed) {
+    if (!status || status.status === "done") return "";
+    if (status.status === "waiting") return `<span class="tag">Waiting for Claude</span>`;
+    return `<span class="tag state-err">${esc(failed)}: ${esc(status.error)}</span>`;
+  }
 
   // ---------- render ----------
   function render() {
@@ -338,8 +346,10 @@ details.history summary::-webkit-details-marker { display: none; }
     $("binding").hidden = !meta;
     if (meta) {
       $("worktree").textContent = meta.worktree || "not set";
-      $("branch").textContent = meta.branch || "not set";
-      if (document.activeElement !== $("server")) $("server").value = meta.nvim_server || "";
+      $("branch").textContent = state.branch || "unknown";
+      if (document.activeElement !== $("server")) {
+        $("server").value = (state.settings && state.settings.nvim_server) || S.DEFAULT_NVIM_SERVER;
+      }
     }
 
     if (!ids.length) {
@@ -397,8 +407,7 @@ details.history summary::-webkit-details-marker { display: none; }
 
     $("messages").innerHTML = conv.messages.map((m) => {
       const claude = m.role === "claude";
-      const tag = m.role === "user" && m.status === "pending" ? `<span class="tag">Waiting for Claude</span>`
-        : m.status === "error" ? `<span class="tag state-err">Claude couldn't answer: ${esc(m.error || "unknown error")}</span>` : "";
+      const tag = claude ? "" : statusTag(S.answerStatus(state, m.id), "Claude couldn't answer");
       return `<li class="msg ${claude ? "claude" : "user"}">
         <span class="avatar" aria-hidden="true">${claude ? "C" : "Y"}</span>
         <div style="min-width:0;display:grid;gap:4px">
@@ -407,10 +416,13 @@ details.history summary::-webkit-details-marker { display: none; }
         </div></li>`;
     }).join("");
 
-    const compressing = pendingCompress();
+    const compression = S.compressStatus(state, current);
+    const compressing = !!compression && compression.status === "waiting";
+    $("compress-status").innerHTML = statusTag(compression, "Compression failed");
+    $("compress-status").hidden = !$("compress-status").innerHTML;
     $("compress").disabled = !conv.messages.length || compressing;
     $("compress").textContent = compressing ? "Compressing…" : "Compress";
-    $("undo").disabled = S.undoTarget(state, current) === undefined;
+    $("undo").disabled = !S.undoTarget(state, current);
     renderHistory();
 
     if ($("draft").dataset.card !== current) {
@@ -420,7 +432,7 @@ details.history summary::-webkit-details-marker { display: none; }
   }
 
   function renderHistory() {
-    const head = state.cards[current].head || null;
+    const head = S.head(state, current);
     const rows = [];
     const walk = (parent, depth) => S.children(state, current, parent).forEach((n) => {
       rows.push({ id: n.id, depth, label: `Compressed ${when(n.created_at)}`, detail: `${(n.digest || []).length} questions and concepts` });
@@ -440,50 +452,70 @@ details.history summary::-webkit-details-marker { display: none; }
   }
 
   // ---------- server ----------
+  /** The one place the offline notice is shown or cleared. It stays until the server answers
+   *  again, then clears along with any action failure the outage caused. */
+  function setOffline(offline) {
+    if (offline) {
+      note(OFFLINE, "err");
+      $("notice").dataset.offline = "1";
+    } else if ($("notice").dataset.offline) {
+      delete $("notice").dataset.offline;
+      note("");
+    }
+  }
+
+  /** Posts to a server route; a server that doesn't answer replies like a refusal. */
   async function api(route, body) {
     try {
       const res = await fetch(route, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-      return await res.json();
+      const reply = await res.json();
+      setOffline(false);
+      return reply;
     } catch (e) {
-      return { ok: false, error: "The deck server isn't answering. Start it again with node deck/server.mjs <deck folder>." };
+      setOffline(true);
+      return { ok: false, error: OFFLINE };
     }
   }
 
-  async function write(collection, id, data, merge) {
-    const r = await api("/api/write", { collection, id, data, merge: !!merge });
-    if (!r.ok) throw new Error(r.error);
-    await poll();
-  }
-
-  const newId = (prefix) => prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  const now = () => new Date().toISOString();
-
+  /** Redraws when the deck changed since the last read. */
   async function poll() {
+    let text;
     try {
-      const text = await (await fetch("/api/state", { cache: "no-store" })).text();
-      loaded = true;
-      if ($("notice").dataset.offline) { note(""); delete $("notice").dataset.offline; }
-      if (text === lastState) return;
-      lastState = text;
-      Object.assign(state, JSON.parse(text));
-      render();
+      text = await (await fetch("/api/state", { cache: "no-store" })).text();
     } catch (e) {
-      note("The deck server isn't answering. Start it again with node deck/server.mjs <deck folder>.", "err");
-      $("notice").dataset.offline = "1";
+      return setOffline(true);
     }
+    setOffline(false);
+    loaded = true;
+    if (text === lastState) return;
+    lastState = text;
+    state = JSON.parse(text);
+    render();
+  }
+
+  /** Runs one page action and redraws from the deck it changed; a refusal is shown after
+   *  `failure`. Resolves to whether the server accepted it. */
+  async function act(route, body, failure) {
+    const r = await api(route, body);
+    if (!r.ok) note(`${failure}: ${r.error}`, "err");
+    await poll();
+    return r.ok;
   }
 
   // ---------- actions ----------
   async function send() {
+    const card = current;
     const text = $("draft").value.trim();
     if (!text) return;
-    try {
-      await write("messages", newId("m-"), { card_id: current, role: "user", body_md: text, status: "pending", created_at: now() });
-      $("draft").value = ""; drafts[current] = "";
+    if (await act("/api/ask", { card_id: card, body_md: text }, "Your message wasn't saved")) {
+      drafts[card] = "";
+      if ($("draft").dataset.card === card) $("draft").value = "";
       note("");
-    } catch (e) {
-      note("Your message wasn't saved: " + e.message, "err");
     }
+  }
+
+  function setHead(node) {
+    act("/api/head", { card_id: current, node }, "The conversation wasn't switched");
   }
 
   async function openInNeovim(args, key) {
@@ -509,21 +541,20 @@ details.history summary::-webkit-details-marker { display: none; }
   });
   $("compress").addEventListener("click", () => {
     const live = S.conversation(state, current).messages;
-    write("actions", newId("a-"), { kind: "compress", card_id: current, args: { upto: live[live.length - 1].id }, status: "pending", created_at: now() })
-      .catch((e) => note("Compression wasn't requested: " + e.message, "err"));
+    act("/api/compress", { card_id: current, upto: live[live.length - 1].id }, "Compression wasn't requested");
   });
   $("undo").addEventListener("click", () => {
     const target = S.undoTarget(state, current);
-    if (target !== undefined) write("cards", current, { head: target }, true).catch((e) => note(e.message, "err"));
+    if (target) setHead(target.node);
   });
   $("history-list").addEventListener("click", (e) => {
     const b = e.target.closest("[data-head]");
     if (!b) return;
     $("history").open = false;
-    write("cards", current, { head: b.dataset.head || null }, true).catch((err) => note(err.message, "err"));
+    setHead(b.dataset.head || null);
   });
   $("server").addEventListener("change", () =>
-    write("deck", "meta", { nvim_server: $("server").value.trim() }, true).catch((e) => note(e.message, "err")));
+    act("/api/settings", { nvim_server: $("server").value.trim() }, "The Neovim server wasn't saved"));
   document.addEventListener("click", (e) => {
     const goto = e.target.closest("[data-goto]");
     if (goto) {
