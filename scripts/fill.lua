@@ -5,7 +5,8 @@
 ---   nvim -l scripts/fill.lua <markdown_file> [root_dir]
 ---
 --- If root_dir is omitted, the git root of the markdown file is used.
---- The file is modified in-place.
+--- The source file is left untouched: the filled copy is written to a `.filled` sibling
+--- (`guide.md` -> `guide.filled.md`).
 
 -- Add the plugin's lua/ to the module path so require("raconteur.*") works
 -- regardless of where the script is invoked from.
