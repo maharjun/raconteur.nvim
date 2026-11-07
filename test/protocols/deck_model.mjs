@@ -70,6 +70,9 @@ const CASES = [
   ["parseFenceInfo", "empty info is a plain fence", [""], null],
   ["parseFenceInfo", "malformed range and sha are absent", ["lua file=a.lua lines=x sha=XYZ"],
     { lang: "lua", file: "a.lua", start: null, end: null, sha: null }],
+  ["parseFenceInfo", "the first token of a key decides", ["lua file=a.lua lines=x lines=1-2 file=b.lua"],
+    { lang: "lua", file: "a.lua", start: null, end: null, sha: null }],
+  ["parseFenceInfo", "an empty file= is a plain fence", ["lua file= file=a.lua"], null],
 
   // parseLink: the deck's two link kinds, web links, and everything refused.
   ["parseLink", "card link", ["card://fill"], { kind: "card", id: "fill" }],

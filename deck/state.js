@@ -123,7 +123,9 @@
 
   /** Reads a dynamic block's fence info: an optional first-token language (absent when that
    *  token is an attribute), then `file=` (required), `lines=a-b` or `lines=a`, and `sha=`.
-   *  Attributes are whole whitespace-separated tokens; returns null for any other fence. */
+   *  Attributes are whole whitespace-separated tokens and the first token of a key decides, so
+   *  a malformed value reads as absent; returns null for any other fence. Mirrors
+   *  lua/raconteur/parser.lua through test/fixtures/fence_info.json. */
   function parseFenceInfo(info) {
     const tokens = (info || "").trim().split(/\s+/).filter(Boolean);
     const attr = (name) => {
@@ -161,7 +163,7 @@
   }
 
   function withIds(map) {
-    return Object.entries(map || {}).map(([docId, doc]) => ({ ...doc, id: docId }));
+    return Object.entries(map || {}).map(([docId, doc]) => ({ id: docId, ...doc }));
   }
 
   function messageWithId(state, messageId) {
