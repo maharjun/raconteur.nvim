@@ -1,15 +1,31 @@
 --- Deck relay: the bridge between the deck (its server and the agent) and the user's Neovim.
---- It runs in a normal headless startup, so raconteur.nvim comes from the user's own Neovim
---- setup, and a deck fills code exactly as the user's plugin renders it:
+--- It loads raconteur.nvim from the checkout named in `raconteur-path` next to this file, so a
+--- deck fills code exactly as the user's plugin renders it, without starting their config:
 ---
----   nvim --headless -n -i NONE -S relay.lua < <request>
+---   nvim -l relay.lua < <request>
 ---
 --- The request is one JSON object naming its `command`; the result is one JSON object on
---- stdout ({ ok = true, ... } or { ok = false, error = "<sentence for the user>" }), and Neovim
---- always exits, 0 when ok:
+--- stdout ({ ok = true, ... } or { ok = false, error = "<sentence for the user>" }), exit 0 when
+--- ok:
 ---
 ---   {"command": "fill", "worktree": ..., "path": <deck document>}
 ---   {"command": "goto", "server": ..., "worktree": ..., "file": ..., "line"?, "heading"?, "sha"?}
+local PATH_FILE = vim.fn.fnamemodify(debug.getinfo(1, "S").source:gsub("^@", ""), ":p:h")
+  .. "/raconteur-path"
+
+--- Puts the raconteur.nvim checkout that `raconteur-path` names on the module path.
+--- @return string|nil error  sentence saying what to fix, when the checkout can't be loaded
+local function load_plugin()
+  local file = io.open(PATH_FILE)
+  if not file then return PATH_FILE .. " is missing; write the raconteur.nvim checkout's path to it." end
+  local root = vim.fn.expand(vim.trim(file:read("*a")))
+  file:close()
+  if vim.fn.filereadable(root .. "/lua/raconteur/fill.lua") ~= 1 then
+    return PATH_FILE .. " names " .. root .. ", which is not a raconteur.nvim checkout."
+  end
+  package.path = root .. "/lua/?.lua;" .. root .. "/lua/?/init.lua;" .. package.path
+end
+
 local M = {}
 
 local function normalize(path)
@@ -150,13 +166,12 @@ local function run(stdin)
   for _, field in ipairs(command.required) do
     if type(request[field]) ~= "string" then return { ok = false, error = USAGE } end
   end
-  if not pcall(require, "raconteur.fill") then
-    return { ok = false, error = "raconteur.nvim is not installed in this Neovim setup." }
-  end
+  local missing = load_plugin()
+  if missing then return { ok = false, error = missing } end
   return command.run(request)
 end
 
--- Any failure still prints a result and exits, so a headless Neovim never waits forever.
+-- Any failure still prints one JSON result, so callers always get an answer they can read.
 local ran, result = xpcall(run, debug.traceback, io.read("*a"))
 if not ran then result = { ok = false, error = "The relay failed: " .. tostring(result) } end
 io.stdout:write(vim.json.encode(result) .. "\n")

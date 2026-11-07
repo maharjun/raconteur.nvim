@@ -14,8 +14,17 @@ questions it answered and the concepts it uncovered, each linked to the card tha
 answer. So the deck grows into a knowledge base.
 
 `<skill>` is this skill's base directory; everything the deck runs is in it. It needs `node`,
-`nvim` and `git` on the PATH, and raconteur.nvim installed in the user's Neovim: `fill` starts
-Neovim the way the user does and uses their copy of the plugin.
+`nvim` and `git` on the PATH, and the user's raconteur.nvim checkout, named in
+`<skill>/raconteur-path`.
+
+## Setup, once
+
+If `<skill>/raconteur-path` does not exist, find the raconteur.nvim checkout the user's Neovim
+loads. Search their Neovim config for its plugin spec (`grep -rl raconteur ~/.config/nvim`): a
+local spec names the checkout (`dir = "..."`); a spec installed from git lives in the plugin
+manager's folder (lazy.nvim: `~/.local/share/nvim/lazy/raconteur.nvim`). Confirm that
+`<path>/lua/raconteur/fill.lua` exists, then write the absolute path, alone on one line, to
+`<skill>/raconteur-path`. If no checkout is found, ask the user where it is.
 
 ## The deck folder
 
@@ -46,7 +55,7 @@ node <skill>/deck.mjs <deck> check                         # problems, or "deck 
 node <skill>/deck.mjs <deck> pending                       # requests to handle, oldest first
 node <skill>/deck.mjs <deck> conversation <card> [--upto <message-id>]
 echo '{"command":"fill","worktree":"<worktree>","path":"<deck>/cards/<id>.json"}' |
-  nvim --headless -n -i NONE -S <skill>/relay.lua          # copies code into the document
+  nvim -l <skill>/relay.lua                                # copies code into the document
 node <skill>/server.mjs <deck> [port]                      # serves the page; prints its URL
 ```
 
