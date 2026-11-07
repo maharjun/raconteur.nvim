@@ -7,7 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap">
 <style>
-/* Layout: a slide rail beside one card at a time; the card's conversation sits under its prose. */
+/* Layout: a collapsible card menu beside one card at a time, or above it in a narrow window;
+   the card's conversation sits under its prose. */
 :root {
   --bg: #f3f4f7; --surface: #ffffff; --fg: #1a2029; --muted: #5d6675; --line: #dde1e8;
   --accent: #2c55b8; --accent-soft: #e7ecf9; --code-bg: #f8f9fb; --gutter: #9aa3b2;
@@ -70,9 +71,10 @@ code, pre { font-family: var(--font-mono); font-size: 0.8125rem; }
 }
 
 .layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 28px; align-items: start; }
-@media (max-width: 760px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+.layout[data-rail="closed"] { grid-template-columns: minmax(0, 1fr); }
+.layout[data-rail="closed"] .rail { display: none; }
 
-/* Slide rail: the deck's order is real, so cards are numbered. */
+/* Card menu: the deck's order is real, so cards are numbered. */
 .rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); display: grid; gap: 2px; }
 .rail-label { font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px 10px; }
 .rail a {
@@ -82,11 +84,13 @@ code, pre { font-family: var(--font-mono); font-size: 0.8125rem; }
 .rail a .n { color: var(--muted); font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 0.75rem; padding-top: 1px; }
 .rail a:hover { background: var(--accent-soft); }
 .rail a[aria-current="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
-@media (max-width: 760px) {
-  .rail { position: static; display: flex; overflow-x: auto; gap: 4px; padding-bottom: 4px; }
-  .rail-label { display: none; }
-  .rail a { flex: 0 0 auto; max-width: 14rem; }
+/* The menu's breakpoint is NARROW in the script; there it opens above the card, full width. */
+@media (max-width: 900px) {
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .rail { position: static; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 6px; }
 }
+.card-where { display: flex; align-items: center; gap: 10px; }
+#rail-toggle[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
 
 /* The card: one concept, its code, and its conversation. */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
@@ -152,6 +156,8 @@ a.deck-link::before { content: "\2192\00a0"; font-size: 0.85em; }
 }
 
 .messages { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+/* Each question opens a new exchange, so a line separates it from the one before. */
+.msg.user:not(:first-child) { border-top: 1px solid var(--line); padding-top: 16px; }
 .msg { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
 .avatar {
   width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
@@ -218,7 +224,10 @@ details.history summary::-webkit-details-marker { display: none; }
       <div class="card-inner" id="card-inner" hidden>
         <div class="card-head">
           <div class="card-meta">
-            <span class="eyebrow" id="eyebrow"></span>
+            <div class="card-where">
+              <button id="rail-toggle" type="button" aria-controls="rail" aria-expanded="false">&#9776; Cards</button>
+              <span class="eyebrow" id="eyebrow"></span>
+            </div>
             <div class="pager">
               <button id="refresh" type="button">Refresh code</button>
               <button id="prev" type="button" aria-label="Previous card">&larr;</button>
@@ -272,6 +281,11 @@ details.history summary::-webkit-details-marker { display: none; }
   const drafts = {};
   const blockStatus = {};  // "<file>:<line>" -> { kind, text } from the last "Open in Neovim"
   const refreshNotes = {}; // card id -> { kind, text } from the last "Refresh code"
+  const NARROW = matchMedia("(max-width: 900px)");
+  /** Whether the card menu is open, kept apart for wide and narrow windows: beside the card
+   *  it stays open, above the card it opens only when asked. */
+  const railOpen = { wide: true, narrow: false };
+  try { Object.assign(railOpen, JSON.parse(localStorage.getItem("raconteur-deck-rail")) || {}); } catch (e) { /* defaults */ }
   let current = null;
   let loaded = false;
   let lastState = "";
@@ -445,6 +459,20 @@ details.history summary::-webkit-details-marker { display: none; }
         `<span>${esc(r.label)}</span><small>${esc(r.detail)}${(r.id || null) === head ? " · showing" : ""}</small></button>`).join("");
   }
 
+  function railMode() { return NARROW.matches ? "narrow" : "wide"; }
+
+  function showRail(open) {
+    railOpen[railMode()] = open;
+    try { localStorage.setItem("raconteur-deck-rail", JSON.stringify(railOpen)); } catch (e) { /* this page only */ }
+    renderRail();
+  }
+
+  function renderRail() {
+    const open = railOpen[railMode()];
+    document.querySelector(".layout").dataset.rail = open ? "open" : "closed";
+    $("rail-toggle").setAttribute("aria-expanded", String(open));
+  }
+
   function note(text, kind) {
     $("notice").hidden = !text;
     $("notice").className = "notice " + (kind ? "state-" + kind : "");
@@ -573,6 +601,10 @@ details.history summary::-webkit-details-marker { display: none; }
     if (e.key === "ArrowLeft") step(-1);
     if (e.key === "ArrowRight") step(1);
   });
+  $("rail-toggle").addEventListener("click", () => showRail(!railOpen[railMode()]));
+  // Above the card the menu pushes the card down, so choosing a card closes it.
+  $("rail").addEventListener("click", (e) => { if (e.target.closest("a") && NARROW.matches) showRail(false); });
+  NARROW.addEventListener("change", renderRail);
   window.addEventListener("hashchange", render);
 
   function step(delta) {
@@ -581,6 +613,7 @@ details.history summary::-webkit-details-marker { display: none; }
     if (next) location.hash = "c-" + next;
   }
 
+  renderRail();
   poll();
   setInterval(poll, 1000);
 })();
