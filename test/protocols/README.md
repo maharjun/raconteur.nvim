@@ -1,13 +1,10 @@
 # Deck test protocols
 
-Each protocol tests one interface. Every case is a row in the file's `CASES` table, so the file
-itself is the list of what is covered.
+Each file tests one interface; its header names the interface and how to run it.
 
-- `deck_model.mjs`: `deck/state.js`. Fence and link parsing, a card's conversation, the undo
-  tree, and the rules a deck must keep. Run `node test/protocols/deck_model.mjs`.
-- `deck_relay.lua`: `scripts/deck.lua`. `verify`, `goto` and `fill` against headless Neovim
-  servers. Run `nvim --headless -u NONE -i NONE -n -l test/protocols/deck_relay.lua`.
-- `deck_server.mjs`: `deck/server.mjs`. The page's routes: state, writes and which of them wake
-  Claude, refresh, and goto pass-through. Run `node test/protocols/deck_server.mjs`.
+- `deck_model.mjs`: `deck/state.js`, the deck's data model and validity rules.
+- `deck_relay.lua`: `scripts/deck.lua`, the relay CLI against headless Neovim servers.
+- `deck_server.mjs`: `deck/server.mjs`, the page's routes.
+- `fence_info.lua`: the Lua fence-info parser, on the cases shared with `deck_model.mjs`.
 
-Not covered by a protocol yet: the page's rendering and clicks in a browser.
+Not covered yet: the page's rendering and clicks in a browser.
