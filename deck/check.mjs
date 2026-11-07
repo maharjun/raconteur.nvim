@@ -1,7 +1,7 @@
-// Reads a deck dumped with ArtifactData's out_dir (<dir>/<collection>/<id>.json).
+// Reads a deck folder (<deck-dir>/<collection>/<id>.json).
 //
-//   node deck/check.mjs <dir>                  print rule violations; exit 1 if any
-//   node deck/check.mjs <dir> --card <id>      print that card's conversation as JSON
+//   node deck/check.mjs <deck-dir>               print rule violations; exit 1 if any
+//   node deck/check.mjs <deck-dir> --card <id>   print that card's conversation as JSON
 import fs from "node:fs";
 import path from "node:path";
 import "./state.js";

@@ -3,7 +3,7 @@
 // side-effect import; both read globalThis.DeckState.
 //
 // A deck state is { meta, cards, nodes, messages, actions }, each of the last
-// four a map from document id to document, as stored in the artifact database.
+// four a map from document id to document, as stored in the deck folder.
 (function () {
   const DIGEST_KINDS = ["question", "concept"];
 

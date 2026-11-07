@@ -1,5 +1,9 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Raconteur Deck</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap">
 <style>
@@ -32,8 +36,9 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
-  background: var(--bg); color: var(--fg); font: var(--step-0)/1.6 var(--font-body);
+  margin: 0; background: var(--bg); color: var(--fg); font: var(--step-0)/1.6 var(--font-body);
   padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
   padding-block: 20px 48px;
@@ -192,9 +197,10 @@ details.history summary::-webkit-details-marker { display: none; }
 .empty p { margin: 0; color: var(--muted); }
 @media (prefers-reduced-motion: no-preference) { .card { transition: border-color 0.2s; } }
 </style>
-
+</head>
+<body>
 <div class="shell">
-  <header class="deck-head" id="inbox-anchor">
+  <header class="deck-head">
     <h1 class="deck-title" id="deck-title">Raconteur Deck</h1>
     <div class="binding" id="binding" hidden>
       <span>Worktree <b id="worktree"></b></span>
@@ -261,11 +267,11 @@ details.history summary::-webkit-details-marker { display: none; }
   const $ = (id) => document.getElementById(id);
   const state = { meta: null, cards: {}, nodes: {}, messages: {}, actions: {} };
   const drafts = {};
+  const blockStatus = {};  // "<file>:<line>" -> { kind, text } from the last "Open in Neovim"
+  const refreshNotes = {}; // card id -> { kind, text } from the last "Refresh code"
   let current = null;
-  let store = null;      // { write(collection, id, data, merge), newId(collection) }
-  let comments = null;   // comments capability, or null
-  let preview = false;
   let loaded = false;
+  let lastState = "";
 
   // ---------- markdown ----------
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -273,7 +279,7 @@ details.history summary::-webkit-details-marker { display: none; }
   function highlight(code, lang) {
     try {
       if (lang && window.hljs && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;
-    } catch (e) { /* fall through to plain text */ }
+    } catch (e) { /* plain text below */ }
     return esc(code);
   }
 
@@ -285,7 +291,6 @@ details.history summary::-webkit-details-marker { display: none; }
       return `<div class="codewrap"><div class="scroll"><pre class="src"><code>${highlight(code, lang)}</code></pre></div></div>`;
     }
     const first = block.start || 1;
-    const gutter = lines.map((_, i) => first + i).join("\n");
     const range = block.start ? `${block.start}–${block.end}` : "whole file";
     return `<figure class="codewrap" style="margin:0" data-file="${esc(block.file)}" data-line="${first}" data-sha="${esc(block.sha || "")}">
       <figcaption class="block-bar">
@@ -293,7 +298,7 @@ details.history summary::-webkit-details-marker { display: none; }
         <span class="copied">${esc(range)}${block.sha ? ` · copied at ${esc(block.sha)}` : ""}</span>
         <button type="button" data-goto>Open in Neovim</button>
       </figcaption>
-      <div class="scroll"><pre class="gutter" aria-hidden="true">${gutter}</pre><pre class="src"><code>${highlight(lines.join("\n"), lang)}</code></pre></div>
+      <div class="scroll"><pre class="gutter" aria-hidden="true">${lines.map((_, i) => first + i).join("\n")}</pre><pre class="src"><code>${highlight(lines.join("\n"), lang)}</code></pre></div>
     </figure>`;
   }
 
@@ -317,20 +322,19 @@ details.history summary::-webkit-details-marker { display: none; }
 
   // ---------- derived state ----------
   const order = () => ((state.meta && state.meta.order) || []).filter((id) => state.cards[id]);
-  const actionsFor = (cardId, kind) => Object.entries(state.actions)
-    .map(([id, a]) => ({ ...a, id }))
-    .filter((a) => a.card_id === cardId && a.kind === kind)
-    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   const when = (iso) => {
     const d = new Date(iso);
     return isNaN(d) ? "" : d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   };
+  const pendingCompress = () => Object.values(state.actions)
+    .some((a) => a.card_id === current && a.kind === "compress" && a.status === "pending");
 
   // ---------- render ----------
   function render() {
     const meta = state.meta;
     const ids = order();
     $("deck-title").textContent = (meta && meta.title) || "Raconteur Deck";
+    document.title = (meta && meta.title) || "Raconteur Deck";
     $("binding").hidden = !meta;
     if (meta) {
       $("worktree").textContent = meta.worktree || "not set";
@@ -343,7 +347,7 @@ details.history summary::-webkit-details-marker { display: none; }
       $("empty").hidden = false;
       $("empty").innerHTML = loaded
         ? `<h1>No cards yet</h1><p>Ask Claude in your session to add cards to this deck. They appear here as soon as they are written.</p>`
-        : `<h1>Loading the deck…</h1><p>Cards, code and conversations come from this deck's database.</p>`;
+        : `<h1>Loading the deck…</h1><p>Cards, code and conversations come from the deck folder.</p>`;
       $("rail").innerHTML = "";
       return;
     }
@@ -365,47 +369,27 @@ details.history summary::-webkit-details-marker { display: none; }
     $("next").disabled = index === ids.length - 1;
     $("body").innerHTML = md(card.body_md);
     $("refresh").hidden = !$("body").querySelector("[data-file]");
-    renderBlockStatus($("body"));
-    renderRefresh();
+    const refresh = refreshNotes[current];
+    $("refresh-status").hidden = !refresh;
+    if (refresh) {
+      $("refresh-status").className = "notice state-" + refresh.kind;
+      $("refresh-status").textContent = refresh.text;
+    }
     renderTalk();
-  }
-
-  function renderBlockStatus(root) {
-    const gotos = actionsFor(current, "goto");
-    root.querySelectorAll("figure[data-file]").forEach((fig) => {
-      const a = gotos.find((g) => g.args && g.args.file === fig.dataset.file && g.args.line === Number(fig.dataset.line));
-      if (!a) return;
+    document.querySelectorAll("figure[data-file]").forEach((fig) => {
+      const status = blockStatus[fig.dataset.file + ":" + fig.dataset.line];
+      if (!status) return;
       const p = document.createElement("p");
-      p.className = "block-status";
-      if (a.status === "pending") { p.classList.add("state-wait"); p.textContent = "Waiting for Claude to open this in Neovim…"; }
-      else if (a.status === "error") { p.classList.add("state-err"); p.textContent = (a.result && a.result.error) || "Couldn't open this in Neovim."; }
-      else {
-        const r = a.result || {};
-        p.classList.add(r.changed_since_copy ? "state-warn" : "state-ok");
-        p.textContent = `Opened in Neovim at line ${r.line || fig.dataset.line}.` +
-          (r.changed_since_copy ? " The file has changed since this copy; use Refresh code to update it." : "");
-      }
+      p.className = "block-status state-" + status.kind;
+      p.textContent = status.text;
       fig.appendChild(p);
     });
   }
 
-  function renderRefresh() {
-    const a = actionsFor(current, "refresh")[0];
-    const el = $("refresh-status");
-    el.hidden = !a || a.status === "done" && !(a.result && a.result.note);
-    if (!a) return;
-    el.className = "notice " + (a.status === "pending" ? "state-wait" : a.status === "error" ? "state-err" : "state-ok");
-    el.textContent = a.status === "pending" ? "Waiting for Claude to refresh the code copies…"
-      : a.status === "error" ? ((a.result && a.result.error) || "Refresh failed.")
-      : (a.result && a.result.note) || "";
-    $("refresh").disabled = a.status === "pending";
-  }
-
   function renderTalk() {
     const conv = S.conversation(state, current);
-    const digest = $("digest");
-    digest.hidden = !conv.digest.length;
-    digest.innerHTML = conv.digest.map((e) => {
+    $("digest").hidden = !conv.digest.length;
+    $("digest").innerHTML = conv.digest.map((e) => {
       const target = state.cards[e.card_id];
       return `<a href="#c-${esc(e.card_id)}"><span class="kind ${esc(e.kind)}">${e.kind === "concept" ? "Concept" : "Question"}</span>` +
         `<span>${esc(e.text)}</span><span class="to">${esc(target ? target.title : e.card_id)} →</span></a>`;
@@ -422,10 +406,9 @@ details.history summary::-webkit-details-marker { display: none; }
           <div class="prose">${md(m.body_md)}</div>
         </div></li>`;
     }).join("");
-    renderBlockStatus($("messages"));
 
-    const compressing = actionsFor(current, "compress").find((a) => a.status === "pending");
-    $("compress").disabled = !conv.messages.length || !!compressing;
+    const compressing = pendingCompress();
+    $("compress").disabled = !conv.messages.length || compressing;
     $("compress").textContent = compressing ? "Compressing…" : "Compress";
     $("undo").disabled = S.undoTarget(state, current) === undefined;
     renderHistory();
@@ -450,102 +433,108 @@ details.history summary::-webkit-details-marker { display: none; }
         `<span>${esc(r.label)}</span><small>${esc(r.detail)}${(r.id || null) === head ? " · showing" : ""}</small></button>`).join("");
   }
 
-  // ---------- writes ----------
   function note(text, kind) {
-    const el = $("notice");
-    el.hidden = !text;
-    el.className = "notice " + (kind ? "state-" + kind : "");
-    el.textContent = text || "";
+    $("notice").hidden = !text;
+    $("notice").className = "notice " + (kind ? "state-" + kind : "");
+    $("notice").textContent = text || "";
   }
 
-  const WAKE_REASONS = {
-    writers_only: "Only editors of this deck can notify Claude.",
-    no_session: "No Claude session is watching this deck right now.",
-    off: "Notifying Claude is off in this view.",
-  };
-
-  // Tells the watching Claude session to look at the deck. Called first in a
-  // click handler, because the platform only sends from a recent gesture.
-  async function notifyClaude(what) {
-    if (preview) return note("Preview only: Claude is not notified.", "warn");
-    const later = " Claude will see it the next time it checks the deck.";
-    if (!comments) return note("Saved. This view can't notify Claude." + later, "warn");
-    const can = await comments.canSendToClaude().catch(() => "off");
-    if (can !== "available") return note("Saved. " + (WAKE_REASONS[can] || WAKE_REASONS.off) + later, "warn");
-    const text = `Deck "${(state.meta && state.meta.title) || "Raconteur Deck"}": ${what}. Read pending messages and actions from the deck database.`;
-    const thread = state.meta && state.meta.inbox_thread;
+  // ---------- server ----------
+  async function api(route, body) {
     try {
-      if (thread) {
-        await comments.sendToClaude({ threadId: thread, text });
-      } else {
-        const res = await comments.sendToClaude({ anchor: await comments.anchorFor($("inbox-anchor")), text });
-        await store.write("deck", "meta", { inbox_thread: res.threadId }, true);
-      }
-      note("Claude was notified.", "ok");
+      const res = await fetch(route, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      return await res.json();
     } catch (e) {
-      const code = e && e.code;
-      const reason = code === "consent_required" ? "Allow this page to comment as you, then send again."
-        : code === "rate_limited" ? "Too many sends in a row; wait a moment."
-        : code === "forbidden" ? "Commenting from this page is off for you."
-        : "Notifying Claude failed (" + (code || "unknown") + ").";
-      note("Saved. " + reason + later, "warn");
+      return { ok: false, error: "The deck server isn't answering. Start it again with node deck/server.mjs <deck folder>." };
     }
   }
 
-  async function addAction(kind, args, what) {
-    const id = store.newId("actions");
-    const wake = notifyClaude(what);
-    await store.write("actions", id, { kind, card_id: current, args, status: "pending", created_at: new Date().toISOString() });
-    await wake;
+  async function write(collection, id, data, merge) {
+    const r = await api("/api/write", { collection, id, data, merge: !!merge });
+    if (!r.ok) throw new Error(r.error);
+    await poll();
   }
 
+  const newId = (prefix) => prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const now = () => new Date().toISOString();
+
+  async function poll() {
+    try {
+      const text = await (await fetch("/api/state", { cache: "no-store" })).text();
+      loaded = true;
+      if ($("notice").dataset.offline) { note(""); delete $("notice").dataset.offline; }
+      if (text === lastState) return;
+      lastState = text;
+      Object.assign(state, JSON.parse(text));
+      render();
+    } catch (e) {
+      note("The deck server isn't answering. Start it again with node deck/server.mjs <deck folder>.", "err");
+      $("notice").dataset.offline = "1";
+    }
+  }
+
+  // ---------- actions ----------
   async function send() {
     const text = $("draft").value.trim();
-    if (!text || !store) return;
-    const id = store.newId("messages");
-    const wake = notifyClaude(`new message on card "${state.cards[current].title}"`);
+    if (!text) return;
     try {
-      await store.write("messages", id, { card_id: current, role: "user", body_md: text, status: "pending", created_at: new Date().toISOString() });
+      await write("messages", newId("m-"), { card_id: current, role: "user", body_md: text, status: "pending", created_at: now() });
       $("draft").value = ""; drafts[current] = "";
+      note("");
     } catch (e) {
-      note("Your message wasn't saved: " + ((e && e.message) || "the deck database refused it") + ".", "err");
+      note("Your message wasn't saved: " + e.message, "err");
     }
-    await wake;
   }
 
-  // ---------- events ----------
+  async function openInNeovim(args, key) {
+    if (key) { blockStatus[key] = { kind: "wait", text: "Opening in Neovim…" }; render(); }
+    const r = await api("/api/goto", args);
+    const status = !r.ok ? { kind: "err", text: r.error }
+      : r.changed_since_copy ? { kind: "warn", text: `Opened at line ${r.line}. The file has changed since this copy; use Refresh code to update it.` }
+      : { kind: "ok", text: `Opened in Neovim at line ${r.line}.` };
+    if (key) { blockStatus[key] = status; render(); } else { note(status.text, status.kind); }
+  }
+
   $("composer").addEventListener("submit", (e) => { e.preventDefault(); send(); });
   $("draft").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } });
   $("draft").addEventListener("input", () => { drafts[current] = $("draft").value; });
   $("prev").addEventListener("click", () => step(-1));
   $("next").addEventListener("click", () => step(1));
-  $("refresh").addEventListener("click", () => addAction("refresh", {}, `refresh code on card "${state.cards[current].title}"`));
+  $("refresh").addEventListener("click", async () => {
+    const card = current;
+    refreshNotes[card] = { kind: "wait", text: "Refreshing code copies…" }; render();
+    const r = await api("/api/refresh", { card_id: card });
+    refreshNotes[card] = r.ok ? { kind: "ok", text: r.note } : { kind: "err", text: r.error };
+    await poll(); render();
+  });
   $("compress").addEventListener("click", () => {
     const live = S.conversation(state, current).messages;
-    addAction("compress", { upto: live[live.length - 1].id }, `compress the conversation on card "${state.cards[current].title}"`);
+    write("actions", newId("a-"), { kind: "compress", card_id: current, args: { upto: live[live.length - 1].id }, status: "pending", created_at: now() })
+      .catch((e) => note("Compression wasn't requested: " + e.message, "err"));
   });
   $("undo").addEventListener("click", () => {
     const target = S.undoTarget(state, current);
-    if (target !== undefined) store.write("cards", current, { head: target }, true);
+    if (target !== undefined) write("cards", current, { head: target }, true).catch((e) => note(e.message, "err"));
   });
   $("history-list").addEventListener("click", (e) => {
     const b = e.target.closest("[data-head]");
     if (!b) return;
-    store.write("cards", current, { head: b.dataset.head || null }, true);
     $("history").open = false;
+    write("cards", current, { head: b.dataset.head || null }, true).catch((err) => note(err.message, "err"));
   });
-  $("server").addEventListener("change", () => store && store.write("deck", "meta", { nvim_server: $("server").value.trim() }, true));
+  $("server").addEventListener("change", () =>
+    write("deck", "meta", { nvim_server: $("server").value.trim() }, true).catch((e) => note(e.message, "err")));
   document.addEventListener("click", (e) => {
     const goto = e.target.closest("[data-goto]");
     if (goto) {
       const fig = goto.closest("figure");
-      addAction("goto", { file: fig.dataset.file, line: Number(fig.dataset.line), sha: fig.dataset.sha || null }, `open ${fig.dataset.file} in Neovim`);
+      openInNeovim({ file: fig.dataset.file, line: Number(fig.dataset.line), sha: fig.dataset.sha || null }, fig.dataset.file + ":" + fig.dataset.line);
       return;
     }
     const walk = e.target.closest("[data-walk]");
     if (walk) {
       e.preventDefault();
-      addAction("goto", { file: walk.dataset.walk, heading: walk.dataset.heading || null }, `open walkthrough ${walk.dataset.walk} in Neovim`);
+      openInNeovim({ file: walk.dataset.walk, heading: walk.dataset.heading || null });
     }
   });
   document.addEventListener("keydown", (e) => {
@@ -561,46 +550,9 @@ details.history summary::-webkit-details-marker { display: none; }
     if (next) location.hash = "c-" + next;
   }
 
-  // ---------- data ----------
-  function applySnapshot(collection, snap) {
-    state[collection] = {};
-    snap.docs.forEach((d) => { state[collection][d.id] = d.data(); });
-  }
-
-  async function boot() {
-    if (window.__DECK_PREVIEW__) {
-      preview = true;
-      Object.assign(state, JSON.parse(JSON.stringify(window.__DECK_PREVIEW__)));
-      let n = 0;
-      store = {
-        newId: (c) => `${c}-preview-${++n}`,
-        write: async (c, id, data, merge) => {
-          if (c === "deck") state.meta = { ...state.meta, ...data };
-          else state[c][id] = merge ? { ...state[c][id], ...data } : data;
-          render();
-        },
-      };
-      loaded = true;
-      return render();
-    }
-    if (!window.claude || !window.claude.use) { loaded = true; return render(); }
-    const db = await window.claude.use("db");
-    comments = await window.claude.use("comments");
-    if (!db) {
-      $("empty").innerHTML = "<h1>Sign in to open this deck</h1><p>The cards live in this deck's database, which needs a signed-in claude.ai view.</p>";
-      return;
-    }
-    store = {
-      newId: (c) => db.collection(c).doc().id,
-      write: (c, id, data, merge) => (merge ? db.doc(`${c}/${id}`).update(data) : db.doc(`${c}/${id}`).set(data)),
-    };
-    const slow = setTimeout(() => { if (!loaded) { $("empty").innerHTML = "<h1>The deck database isn't answering yet</h1><p>It keeps retrying. Check your connection if this stays.</p>"; } }, 10000);
-    const fail = (e) => note("The deck stopped updating: " + ((e && e.message) || "database error") + ". Reload to reconnect.", "err");
-    db.doc("deck/meta").onSnapshot((d) => { state.meta = d.exists ? d.data() : null; loaded = true; clearTimeout(slow); render(); }, fail);
-    ["cards", "nodes", "messages", "actions"].forEach((c) =>
-      db.collection(c).onSnapshot((snap) => { applySnapshot(c, snap); render(); }, fail));
-  }
-
-  boot();
+  poll();
+  setInterval(poll, 1000);
 })();
 </script>
+</body>
+</html>
