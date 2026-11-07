@@ -1,4 +1,4 @@
--- Protocol: the deck relay CLI (scripts/deck.lua).
+-- Protocol: the deck relay CLI (skill/raconteur-deck/relay.lua).
 --
 -- Interface under test: the commands the deck server and the agent run, called exactly as they
 -- call them (a child `nvim -l` process with one JSON request on stdin), against real headless
@@ -15,7 +15,7 @@
 --
 -- Run: nvim --headless -u NONE -i NONE -n -l test/protocols/deck_relay.lua
 local root = vim.fn.getcwd()
-local script = root .. "/scripts/deck.lua"
+local script = root .. "/skill/raconteur-deck/relay.lua"
 local dir = vim.fn.tempname()
 
 local function sh(cwd, cmd)

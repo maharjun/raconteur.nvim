@@ -1,8 +1,8 @@
 // Local deck server: serves the page and turns each page action into whole-document writes in
 // the deck folder. It is the only writer of settings, heads, user messages, requests and
-// inbox.log; the agent writes everything else (see the @typedefs in deck/state.js).
+// inbox.log; the agent writes everything else (see the @typedefs in state.js).
 //
-//   node deck/server.mjs <deck-dir> [port]       prints the page's URL
+//   node server.mjs <deck-dir> [port]       prints the page's URL
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -12,13 +12,13 @@ import { readDeck, writeDoc } from "./folder.mjs";
 
 const S = globalThis.DeckState;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const RELAY = path.join(HERE, "..", "scripts", "deck.lua");
+const RELAY = path.join(HERE, "relay.lua");
 const STATIC = { "/": ["page.html", "text/html"], "/state.js": ["state.js", "text/javascript"] };
 
 const dir = path.resolve(process.argv[2] || "");
 const port = Number(process.argv[3] || 0);
 if (!process.argv[2] || !fs.existsSync(dir)) {
-  console.error("usage: node deck/server.mjs <deck-dir> [port]");
+  console.error("usage: node server.mjs <deck-dir> [port]");
   process.exit(1);
 }
 
@@ -64,7 +64,7 @@ function createRequest(kind, cardId, arg, at) {
   return id;
 }
 
-/** Runs one relay command (scripts/deck.lua) with its JSON request; resolves to its JSON result. */
+/** Runs one relay command (relay.lua) with its JSON request; resolves to its JSON result. */
 function relay(command, request) {
   return new Promise((resolve) => {
     const child = spawn("nvim", ["-l", RELAY, command]);

@@ -1,4 +1,5 @@
-// Protocol: the deck folder (deck/folder.mjs) and the agent's CLI (deck/deck.mjs).
+// Protocol: the deck folder (skill/raconteur-deck/folder.mjs) and the agent's CLI
+// (skill/raconteur-deck/deck.mjs).
 //
 // Interface under test: readDeck and writeDoc on a real folder, and the CLI's output and exit
 // code. Every case is one row in CASES: [description, files, run, expected], where `files` are
@@ -12,9 +13,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readDeck, writeDoc } from "../../deck/folder.mjs";
+import { readDeck, writeDoc } from "../../skill/raconteur-deck/folder.mjs";
 
-const CLI = fileURLToPath(new URL("../../deck/deck.mjs", import.meta.url));
+const CLI = fileURLToPath(new URL("../../skill/raconteur-deck/deck.mjs", import.meta.url));
 const T = (second) => new Date(Date.UTC(2026, 10, 7, 10, 0, second)).toISOString();
 
 // One card compressed once (n1 covers m1-m2); m3 is waiting for its answer.

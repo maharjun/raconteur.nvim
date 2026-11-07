@@ -1,12 +1,12 @@
 // The agent's view of a deck folder.
 //
-//   node deck/deck.mjs <deck-dir> check                                print problems; exit 1 if any
-//   node deck/deck.mjs <deck-dir> pending                              requests to serve, oldest first
-//   node deck/deck.mjs <deck-dir> conversation <card> [--upto <id>]    a card's conversation
+//   node deck.mjs <deck-dir> check                                print problems; exit 1 if any
+//   node deck.mjs <deck-dir> pending                              requests to serve, oldest first
+//   node deck.mjs <deck-dir> conversation <card> [--upto <id>]    a card's conversation
 import { readDeck } from "./folder.mjs";
 
 const S = globalThis.DeckState;
-const USAGE = "usage: node deck/deck.mjs <deck-dir> check | pending | conversation <card> [--upto <message-id>]";
+const USAGE = "usage: node deck.mjs <deck-dir> check | pending | conversation <card> [--upto <message-id>]";
 
 function fail(message) {
   console.error(message);

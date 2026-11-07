@@ -1,4 +1,4 @@
-// Protocol: the deck model (deck/state.js).
+// Protocol: the deck model (skill/raconteur-deck/state.js).
 //
 // Interface under test: the pure functions the page renders from and the agent checks its
 // writes with. Input is a deck state as readDeck returns it; output is plain data. Every case is
@@ -8,7 +8,7 @@
 // Run: node test/protocols/deck_model.mjs
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import "../../deck/state.js";
+import "../../skill/raconteur-deck/state.js";
 
 const S = globalThis.DeckState;
 const FENCES = JSON.parse(fs.readFileSync(new URL("../fixtures/fence_info.json", import.meta.url), "utf8"));

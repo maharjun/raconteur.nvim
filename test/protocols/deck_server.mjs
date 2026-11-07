@@ -1,4 +1,4 @@
-// Protocol: the local deck server's HTTP interface (deck/server.mjs).
+// Protocol: the local deck server's HTTP interface (skill/raconteur-deck/server.mjs).
 //
 // Interface under test: the routes the page calls, against a real server process and a deck
 // folder on disk. Every case is one row in CASES, run in order:
@@ -16,7 +16,7 @@ import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { readDeck, writeDoc } from "../../deck/folder.mjs";
+import { readDeck, writeDoc } from "../../skill/raconteur-deck/folder.mjs";
 
 const S = globalThis.DeckState;
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
@@ -149,7 +149,7 @@ const CASES = [
     () => fs.writeFileSync(path.join(deck, "cards/c1.json"), "{\"title\": \"Car")],
 ];
 
-const server = spawn("node", [path.join(root, "deck/server.mjs"), deck, "0"]);
+const server = spawn("node", [path.join(root, "skill/raconteur-deck/server.mjs"), deck, "0"]);
 const url = await new Promise((resolve, reject) => {
   server.stdout.once("data", (d) => resolve(String(d).trim()));
   server.once("exit", () => reject(new Error("server exited")));

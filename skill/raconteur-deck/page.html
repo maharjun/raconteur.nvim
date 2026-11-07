@@ -266,7 +266,7 @@ details.history summary::-webkit-details-marker { display: none; }
 (function () {
   const S = globalThis.DeckState;
   const $ = (id) => document.getElementById(id);
-  const OFFLINE = "The deck server isn't answering. Start it again with node deck/server.mjs <deck folder>.";
+  const OFFLINE = "The deck server isn't answering. Ask Claude to start it again.";
   // An empty deck until the server's first reply.
   let state = Object.fromEntries([...S.SINGLETONS.map((k) => [k, null]), ...S.COLLECTIONS.map((k) => [k, {}]), ["branch", null]]);
   const drafts = {};

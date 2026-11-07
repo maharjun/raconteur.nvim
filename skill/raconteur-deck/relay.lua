@@ -1,6 +1,16 @@
---- Deck relay: the bridge between the local deck server (and the agent) and the user's Neovim.
---- Every command returns a plain table that scripts/deck.lua prints as JSON:
---- { ok = true, ... } or { ok = false, error = "<sentence for the user>" }.
+#!/usr/bin/env -S nvim -l
+--- Deck relay: the bridge between the deck (its server and the agent) and the user's Neovim.
+--- One JSON request on stdin, one JSON result on stdout ({ ok = true, ... } or
+--- { ok = false, error = "<sentence for the user>" }), exit 0 when ok.
+---
+---   nvim -l relay.lua fill < {"worktree": ..., "path": <deck document>}
+---   nvim -l relay.lua goto < {"server": ..., "worktree": ..., "file": ..., "line"?: ..., "heading"?: ..., "sha"?: ...}
+---
+--- `lua/` next to this file is raconteur.nvim's own Lua, so a deck fills code exactly as the
+--- plugin renders it.
+local script_dir = debug.getinfo(1, "S").source:match("@?(.*/)") or "./"
+package.path = script_dir .. "lua/?.lua;" .. script_dir .. "lua/?/init.lua;" .. package.path
+
 local M = {}
 
 local fill = require("raconteur.fill")
@@ -126,4 +136,26 @@ function M.fill(worktree, path)
   return { ok = true, sha = head, changed = true }
 end
 
-return M
+--- Each command names the string fields its request must carry.
+local COMMANDS = {
+  fill = { required = { "worktree", "path" }, run = function(r) return M.fill(r.worktree, r.path) end },
+  goto = { required = { "server", "worktree", "file" }, run = M.goto },
+}
+
+local USAGE = 'usage: nvim -l relay.lua fill|goto, with one JSON request on stdin: '
+  .. 'fill {"worktree","path"}; goto {"server","worktree","file","line"?,"heading"?,"sha"?}'
+
+local function run(name, stdin)
+  local command = COMMANDS[name]
+  -- A null optional field means the field is absent.
+  local parsed, request = pcall(vim.json.decode, stdin, { luanil = { object = true } })
+  if not command or not parsed or type(request) ~= "table" then return { ok = false, error = USAGE } end
+  for _, field in ipairs(command.required) do
+    if type(request[field]) ~= "string" then return { ok = false, error = USAGE } end
+  end
+  return command.run(request)
+end
+
+local result = run((arg or {})[1], io.read("*a"))
+io.stdout:write(vim.json.encode(result) .. "\n")
+os.exit(result.ok and 0 or 1)

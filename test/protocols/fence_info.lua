@@ -2,7 +2,7 @@
 --
 -- Interface under test: parser.parse_lines on one fence whose open line carries the case's info
 -- string. Every case is one row in CASES, read from test/fixtures/fence_info.json, which
--- test/protocols/deck_model.mjs runs through deck/state.js too:
+-- test/protocols/deck_model.mjs runs through skill/raconteur-deck/state.js too:
 --   { info, expect = { lang, file, start, end, sha } or null when it is not a raconteur fence }
 -- A JSON null field means the block's field is nil.
 --
