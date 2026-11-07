@@ -1,11 +1,9 @@
---- Deck relay: the agent's bridge between a deck artifact and the user's
---- Neovim session.  Every function returns a plain table that the CLI
---- (scripts/deck.lua) prints as JSON: { ok = true, ... } or
---- { ok = false, error = "<sentence for the user>" }.
+--- Deck relay: the bridge between the local deck server (and the agent) and the user's Neovim.
+--- Every command returns a plain table that scripts/deck.lua prints as JSON:
+--- { ok = true, ... } or { ok = false, error = "<sentence for the user>" }.
 local M = {}
 
 local fill = require("raconteur.fill")
-local parser = require("raconteur.parser")
 
 local function normalize(path)
   return (vim.fn.resolve(vim.fn.fnamemodify(path, ":p")):gsub("/$", ""))
@@ -23,58 +21,71 @@ local function connect(server)
   return chan
 end
 
---- GitHub-style heading anchor: "## 2. Core Logic" -> "2-core-logic".
-local function slug(text)
-  return (text:lower():gsub("[^%w%s%-]", ""):gsub("%s+", "-"))
-end
-
-local function find_heading(abs_path, heading)
-  local n = 0
-  for line in io.lines(abs_path) do
-    n = n + 1
-    local text = line:match("^#+%s+(.-)%s*$")
-    if text and (slug(text) == heading or text == heading) then return n end
-  end
-end
-
---- Check that the nvim server's global current directory is inside the
---- deck's worktree.  The channel is returned open for the caller to use.
-function M.verify(server, worktree)
+--- Connect to the Neovim at `server`, but only when its global current directory is inside
+--- `worktree`, so a deck never opens files in a session working on another checkout.
+--- @return integer|nil chan  open channel when verified
+--- @return table|nil   failure  { ok = false, error } otherwise
+local function connect_in_worktree(server, worktree)
   local chan = connect(server)
   if not chan then
-    return { ok = false, error = "Can't reach Neovim at " .. server .. ". Start it with nvim --listen " .. server .. "." }
+    return nil, { ok = false, error = "Can't reach Neovim at " .. server .. ". Start it with nvim --listen " .. server .. "." }
   end
   local cwd = vim.rpcrequest(chan, "nvim_call_function", "getcwd", { -1, -1 })
   local code, toplevel = git(cwd, { "rev-parse", "--show-toplevel" })
   local expected = normalize(worktree)
   if code ~= 0 then
     vim.fn.chanclose(chan)
-    return { ok = false, error = "Neovim at " .. server .. " is in " .. cwd .. ", which is not a git worktree. This deck is for " .. expected .. "." }
+    return nil, { ok = false, error = "Neovim at " .. server .. " is in " .. cwd .. ", which is not a git worktree. This deck is for " .. expected .. "." }
   end
   toplevel = normalize(toplevel)
   if toplevel ~= expected then
     vim.fn.chanclose(chan)
-    return { ok = false, error = "Neovim at " .. server .. " is in worktree " .. toplevel .. ", but this deck is for " .. expected .. "." }
+    return nil, { ok = false, error = "Neovim at " .. server .. " is in worktree " .. toplevel .. ", but this deck is for " .. expected .. "." }
   end
-  return { ok = true, worktree = toplevel, cwd = cwd }, chan
+  return chan
 end
 
---- Open <file> in the nvim server at a line, or at a markdown heading.
---- @param target { file: string, line?: integer, heading?: string, sha?: string }
-function M.goto(server, worktree, target)
-  local abs = normalize(worktree) .. "/" .. target.file
-  if vim.fn.filereadable(abs) ~= 1 then
-    return { ok = false, error = target.file .. " does not exist in " .. normalize(worktree) .. "." }
-  end
-  local line = target.line or 1
-  if target.heading then
-    line = find_heading(abs, target.heading)
-    if not line then
-      return { ok = false, error = target.file .. " has no heading matching #" .. target.heading .. "." }
+--- GitHub-style heading anchor: lowercase, drop every ASCII character that is not a letter,
+--- digit, space, hyphen or underscore, then turn each space into a hyphen.
+--- "## 2. Core Logic" -> "2-core-logic".
+local function slug(text)
+  return (text:lower():gsub("[^%w _%-\128-\255]", ""):gsub(" ", "-"))
+end
+
+--- Line of the heading whose anchor is `anchor`; as on GitHub, the nth repeat of a slug is
+--- `<slug>-<n>`.
+local function find_heading(abs_path, anchor)
+  local seen, n = {}, 0
+  for line in io.lines(abs_path) do
+    n = n + 1
+    local text = line:match("^#+%s+(.-)%s*$")
+    if text then
+      local base = slug(text)
+      local id = seen[base] and base .. "-" .. seen[base] or base
+      seen[base] = (seen[base] or 0) + 1
+      if id == anchor then return n end
     end
   end
-  local verified, chan = M.verify(server, worktree)
-  if not verified.ok then return verified end
+end
+
+--- Open `file` in the Neovim at `server`, at `line` or at the heading whose anchor is `heading`.
+--- With `sha`, the result says whether the file changed since the deck's copy was made at it.
+--- @param request { server: string, worktree: string, file: string, line?: integer, heading?: string, sha?: string }
+function M.goto(request)
+  local root = normalize(request.worktree)
+  local abs = root .. "/" .. request.file
+  if vim.fn.filereadable(abs) ~= 1 then
+    return { ok = false, error = request.file .. " does not exist in " .. root .. "." }
+  end
+  local line = request.line or 1
+  if request.heading then
+    line = find_heading(abs, request.heading)
+    if not line then
+      return { ok = false, error = request.file .. " has no heading matching #" .. request.heading .. "." }
+    end
+  end
+  local chan, failure = connect_in_worktree(request.server, root)
+  if not chan then return failure end
   vim.rpcrequest(chan, "nvim_exec_lua", [[
     local path, line = ...
     vim.cmd("tab drop " .. vim.fn.fnameescape(path))
@@ -82,27 +93,37 @@ function M.goto(server, worktree, target)
     vim.cmd("normal! zz")
   ]], { abs, line })
   vim.fn.chanclose(chan)
-  local result = { ok = true, file = target.file, line = line }
-  if target.sha then
+  local result = { ok = true, file = request.file, line = line }
+  if request.sha then
     -- Exit 1 means the file differs between the copy's commit and the working tree.
-    local code = git(normalize(worktree), { "diff", "--quiet", target.sha, "--", target.file })
+    local code = git(root, { "diff", "--quiet", request.sha, "--", request.file })
     if code == 0 or code == 1 then result.changed_since_copy = code == 1 end
   end
   return result
 end
 
---- Fill every dynamic block in a card body with the worktree's current lines
---- and stamp it with sha=<HEAD>.
-function M.fill(worktree, markdown)
+--- Fill every dynamic block in the `body_md` of the deck document at `path` with the worktree's
+--- current lines, stamped with the short HEAD. The document is rewritten whole (temp file and
+--- rename) only when its body changed, so an unchanged document keeps its bytes.
+--- @return table { ok, sha, changed } or { ok = false, error }
+function M.fill(worktree, path)
   local root = normalize(worktree)
   local code, head = git(root, { "rev-parse", "--short", "HEAD" })
   if code ~= 0 then return { ok = false, error = root .. " is not a git worktree." } end
-  local lines = vim.split(markdown, "\n", { plain = true })
-  for _, block in ipairs(parser.parse_lines(lines)) do
-    local info = block.fence_info:gsub("%s+sha=%S+", "") .. " sha=" .. head
-    lines[block.fence_open_line + 1] = block.fence_indent .. block.fence_ticks .. info
+  if vim.fn.filereadable(path) ~= 1 then return { ok = false, error = "Can't read " .. path .. "." } end
+  local parsed, doc = pcall(vim.json.decode, table.concat(vim.fn.readfile(path, "b"), "\n"))
+  if not parsed or type(doc) ~= "table" or type(doc.body_md) ~= "string" then
+    return { ok = false, error = path .. " is not a deck document with a body_md." }
   end
-  return { ok = true, sha = head, markdown = table.concat(fill.fill_lines(lines, root), "\n") }
+  local lines = vim.split(doc.body_md, "\n", { plain = true })
+  local body = table.concat(fill.fill_lines(lines, root, { sha = head }), "\n")
+  if body == doc.body_md then return { ok = true, sha = head, changed = false } end
+  doc.body_md = body
+  local temp = path .. ".tmp"
+  vim.fn.writefile({ vim.json.encode(doc) }, temp)
+  local renamed, err = vim.uv.fs_rename(temp, path)
+  if not renamed then return { ok = false, error = "Can't write " .. path .. ": " .. err } end
+  return { ok = true, sha = head, changed = true }
 end
 
 return M
