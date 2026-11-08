@@ -55,8 +55,11 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.primary:hover:not(:disabled) { color: var(--surface); filter: brightness(1.08); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 a { color: var(--accent); text-underline-offset: 2px; }
-/* A link to a term card: dotted, with the definition on hover. */
-a.term-link { color: inherit; text-decoration-style: dotted; text-decoration-color: var(--accent); }
+/* A link to a term card: a faint underline that stays out of the sentence's way. */
+a.term-link {
+  color: inherit; text-decoration: underline dotted 1px var(--gutter); text-underline-offset: 3px;
+}
+a.term-link:hover { color: var(--accent); text-decoration-color: currentColor; }
 code, pre { font-family: var(--font-mono); font-size: 0.8125rem; }
 
 .shell { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
@@ -344,7 +347,7 @@ details.history summary::-webkit-details-marker { display: none; }
     if (link.kind === "card") {
       const target = state.cards[link.id];
       if (S.cardKind(target) !== "term") return `<a class="deck-link" href="#c-${esc(link.id)}">${text}</a>`;
-      return `<a class="deck-link term-link" href="#c-${esc(link.id)}" title="${esc(definition(target))}">${text}</a>`;
+      return `<a class="term-link" href="#c-${esc(link.id)}" title="${esc(definition(target))}">${text}</a>`;
     }
     return `<a class="deck-link" href="#" data-walk="${esc(link.path)}" data-heading="${esc(link.heading || "")}">${text}</a>`;
   }
