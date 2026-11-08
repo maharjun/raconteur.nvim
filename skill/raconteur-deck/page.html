@@ -55,6 +55,8 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.primary:hover:not(:disabled) { color: var(--surface); filter: brightness(1.08); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 a { color: var(--accent); text-underline-offset: 2px; }
+/* A link to a term card: dotted, with the definition on hover. */
+a.term-link { color: inherit; text-decoration-style: dotted; text-decoration-color: var(--accent); }
 code, pre { font-family: var(--font-mono); font-size: 0.8125rem; }
 
 .shell { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
@@ -84,6 +86,13 @@ code, pre { font-family: var(--font-mono); font-size: 0.8125rem; }
 .rail a .n { color: var(--muted); font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 0.75rem; padding-top: 1px; }
 .rail a:hover { background: var(--accent-soft); }
 .rail a[aria-current="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+/* Term cards sit apart from the concept cards, closed until wanted. */
+.rail-terms { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); display: grid; gap: 2px; }
+.rail-terms summary {
+  cursor: pointer; padding: 4px 10px; font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted);
+}
+.rail-terms summary:hover { color: var(--accent); }
 /* The menu's breakpoint is NARROW in the script; there it opens above the card, full width. */
 @media (max-width: 900px) {
   .layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
@@ -288,6 +297,7 @@ details.history summary::-webkit-details-marker { display: none; }
   const railOpen = { wide: true, narrow: false };
   try { Object.assign(railOpen, JSON.parse(localStorage.getItem("raconteur-deck-rail")) || {}); } catch (e) { /* defaults */ }
   let current = null;
+  let termsOpen = false; // whether the user opened the card menu's Terms group
   let loaded = false;
   let lastState = "";
 
@@ -321,11 +331,21 @@ details.history summary::-webkit-details-marker { display: none; }
     </figure>`;
   }
 
+  /** A term card's definition as plain text: its first paragraph, without markdown marks. */
+  function definition(card) {
+    const first = (card.body_md || "").trim().split(/\n\s*\n/)[0];
+    return first.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*_]/g, "");
+  }
+
   function linkHtml(href, title, text) {
     const link = S.parseLink(href);
     if (!link) return text;
     if (link.kind === "web") return `<a href="${esc(link.href)}" target="_blank" rel="noopener">${text}</a>`;
-    if (link.kind === "card") return `<a class="deck-link" href="#c-${esc(link.id)}">${text}</a>`;
+    if (link.kind === "card") {
+      const target = state.cards[link.id];
+      if (S.cardKind(target) !== "term") return `<a class="deck-link" href="#c-${esc(link.id)}">${text}</a>`;
+      return `<a class="deck-link term-link" href="#c-${esc(link.id)}" title="${esc(definition(target))}">${text}</a>`;
+    }
     return `<a class="deck-link" href="#" data-walk="${esc(link.path)}" data-heading="${esc(link.heading || "")}">${text}</a>`;
   }
 
@@ -379,20 +399,25 @@ details.history summary::-webkit-details-marker { display: none; }
     }
     const fromHash = /^#c-(.+)$/.exec(location.hash);
     if (fromHash && state.cards[fromHash[1]]) current = fromHash[1];
-    if (!state.cards[current]) current = ids[0];
+    const concepts = S.cardsOfKind(state, "concept");
+    const terms = S.cardsOfKind(state, "term");
+    if (!state.cards[current]) current = concepts[0] || ids[0];
     const card = state.cards[current];
-    const index = ids.indexOf(current);
+    const isTerm = S.cardKind(card) === "term";
+    const siblings = isTerm ? terms : concepts;
+    const index = siblings.indexOf(current);
 
-    $("rail").innerHTML = `<p class="rail-label">Cards</p>` + ids.map((id, i) =>
-      `<a href="#c-${esc(id)}" aria-current="${id === current}"><span class="n">${i + 1}</span><span>${esc(state.cards[id].title || id)}</span></a>`
-    ).join("");
+    const item = (id, n) => `<a href="#c-${esc(id)}" aria-current="${id === current}"><span class="n">${n}</span><span>${esc(state.cards[id].title || id)}</span></a>`;
+    $("rail").innerHTML = `<p class="rail-label">Cards</p>` + concepts.map((id, i) => item(id, i + 1)).join("")
+      + (terms.length ? `<details class="rail-terms"${termsOpen || isTerm ? " open" : ""}><summary>Terms (${terms.length})</summary>`
+        + terms.map((id) => item(id, "")).join("") + `</details>` : "");
 
     $("empty").hidden = true;
     $("card-inner").hidden = false;
-    $("eyebrow").textContent = `Card ${index + 1} of ${ids.length}`;
+    $("eyebrow").textContent = `${isTerm ? "Term" : "Card"} ${index + 1} of ${siblings.length}`;
     $("card-title").textContent = card.title || current;
     $("prev").disabled = index === 0;
-    $("next").disabled = index === ids.length - 1;
+    $("next").disabled = index === siblings.length - 1;
     $("body").innerHTML = md(card.body_md);
     $("refresh").hidden = !$("body").querySelector("[data-file]");
     const refresh = refreshNotes[current];
@@ -608,9 +633,12 @@ details.history summary::-webkit-details-marker { display: none; }
   $("rail").addEventListener("click", (e) => { if (e.target.closest("a") && NARROW.matches) showRail(false); });
   NARROW.addEventListener("change", renderRail);
   window.addEventListener("hashchange", render);
+  // Remember the Terms group's open state across renders; toggle doesn't bubble, so capture it.
+  $("rail").addEventListener("toggle", (e) => { if (e.target.matches(".rail-terms")) termsOpen = e.target.open; }, true);
 
+  /** Moves through the current card's own kind: concept cards, or term cards. */
   function step(delta) {
-    const ids = order();
+    const ids = S.cardsOfKind(state, S.cardKind(state.cards[current]));
     const next = ids[ids.indexOf(current) + delta];
     if (next) location.hash = "c-" + next;
   }

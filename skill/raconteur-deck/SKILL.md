@@ -35,7 +35,7 @@ file, and holds exactly the fields listed here; `deck.mjs check` rejects anythin
 | Document | Written by | Fields |
 |---|---|---|
 | `meta.json` | you | `title`; `worktree` (absolute path); `order` (every card id once, in reading order) |
-| `cards/<id>.json` | you | `title`; `body_md` |
+| `cards/<id>.json` | you | `title`; `body_md`; `kind` (optional: `"term"` for a term card) |
 | `messages/<id>.json` | the server for `role: "user"`, you for `role: "claude"` | `card_id`; `role`; `body_md`; `created_at` |
 | `nodes/<id>.json` | you, once per compress | `card_id`; `parent` (a node id or null); `upto` (a message id); `digest`; `created_at` |
 | `results/<request-id>.json` | you | `status` (`"done"` or `"error"`); `error` (a sentence, only with `"error"`); `created_at` |
@@ -89,6 +89,21 @@ the new lines but leaves the prose as it is, so read the new lines first and dec
 - The prose no longer holds: rewrite the card, then `fill`. A message is the record of a past
   answer, so leave it; say what changed in your next reply on that card if it matters.
 
+## Term cards
+
+A term card defines one term that the deck uses: an identifier like `_gate`, a project word like
+"job", or outside jargon like "STA". It is an ordinary card with `"kind": "term"`. Its `title` is
+the term, and its body starts with one sentence of the form "a <noun> that ...", which the page
+also shows when the reader hovers over a link to it. Code blocks may follow. Its id is `t-` and
+the term in kebab case. The page lists term cards apart from the concept cards, under Terms in
+the card menu, so a reader starts with the concepts and opens a term when they meet it.
+
+Link the first use of each term in every card body and every reply to its term card, including
+first uses inside other term cards: `[job](card://t-job)`, `` [`_gate`](card://t-gate) ``.
+Before you write a body, list the terms it uses that a newcomer to the code would not know, and
+make sure each has a term card. Use one word per thing everywhere: when two words name the same
+thing, keep one, and say so in its term card if the code uses the other.
+
 Links: `[text](card://<id>)` opens another card. `[text](walkthrough://<path>#<anchor>)` opens
 a walkthrough section in Neovim. The anchor is the heading's GitHub anchor: lowercase, drop
 punctuation other than `-` and `_`, spaces become `-` (`## 3. Parsing` is `3-parsing`).
@@ -97,10 +112,11 @@ punctuation other than `-` and `_`, spaces become `-` (`## 3. Parsing` is `3-par
 
 1. Pick two or three concepts, each tied to a small code range.
 2. Write each card with empty dynamic blocks, and run `fill` on it.
-3. Write `meta.json`, with the cards in `order`.
-4. Run `check` and fix what it prints.
-5. Start the server with Bash `run_in_background` and give the user the URL it prints.
-6. Tell the user to start Neovim in the worktree with `nvim --listen /tmp/raconteur-deck.sock`.
+3. Write a term card for each term the cards use, and link each term's first use in every card.
+4. Write `meta.json`, with the concept cards and then the term cards in `order`.
+5. Run `check` and fix what it prints.
+6. Start the server with Bash `run_in_background` and give the user the URL it prints.
+7. Tell the user to start Neovim in the worktree with `nvim --listen /tmp/raconteur-deck.sock`.
    That is the default address; they can change it on the page.
 
 Then start serving.
@@ -129,7 +145,8 @@ Output, in this order:
    sentence when you cannot answer.
 
 If the user asks for a new card, write and `fill` it before the reply, add it to `order`, and
-link it from the reply with `card://`.
+link it from the reply with `card://`. A reply follows the term rules too: link each term's first
+use, and write a term card first for any term the deck doesn't define yet.
 
 ## Compressing (`kind: "compress"`)
 
@@ -146,9 +163,9 @@ state that responsibility for the card you would edit, and decide each answer on
 - An answer that corrects or completes the card's explanation of its own concept goes into that
   card, written the way card bodies are written.
 - An answer about something else goes to the card responsible for that thing, existing or new.
-  This includes a definition of a term the card only uses, background, or the reasoning behind a
-  neighbouring piece of code. Link to that card from the original card with `card://` if a reader
-  needs the way there.
+  This includes background and the reasoning behind a neighbouring piece of code. A definition
+  of a term the card only uses goes into that term's term card. Link to that card from the
+  original card with `card://` if a reader needs the way there.
 - Never widen a card so that it can hold an answer. A card that reads as a mix of definitions,
   side reasoning and its own concept has been muddied; split the extra parts out instead.
 

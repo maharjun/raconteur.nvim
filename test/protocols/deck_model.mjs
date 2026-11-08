@@ -64,6 +64,13 @@ const chose = (node, second) => edited((s) => { s.heads.parser = { node, at: T(s
 
 const ids = (docs) => docs.map((d) => d.id);
 
+// Two term cards, listed in reading order between and after the concept cards.
+const withTerms = () => edited((s) => {
+  s.cards["t-pass"] = { title: "Pass", body_md: "A walk over the lines.", kind: "term" };
+  s.cards["t-fence"] = { title: "Fence", body_md: "A run of backticks.", kind: "term" };
+  s.meta.order = ["parser", "t-fence", "fill", "t-pass"];
+});
+
 const block = (attrs) => S.parseFenceInfo(`lua file=a.lua lines=2-3 ${attrs}`);
 const BLOCKS_MD = [
   "````lua file=a.lua lines=2-3 sha=1 hash=aaa", "```", "````", "",
@@ -107,6 +114,12 @@ const CASES = [
   ["parseLink", "script link is refused", ["javascript:alert(1)"], null],
 
   // head: the newer of the user's choice and the card's newest node.
+  // cardKind, cardsOfKind: term cards are listed apart from concept cards, each in reading order.
+  ["cardKind", "a card without a kind is a concept", [{ title: "Parser", body_md: "" }], "concept"],
+  ["cardKind", "a term card", [{ title: "Fence", body_md: "", kind: "term" }], "term"],
+  ["cardsOfKind", "concept cards in order", [withTerms(), "concept"], ["parser", "fill"]],
+  ["cardsOfKind", "term cards in order", [withTerms(), "term"], ["t-fence", "t-pass"]],
+
   ["head", "newest node when nothing was chosen", [deck(), "parser"], "n3"],
   ["head", "never compressed", [deck(), "fill"], null],
   ["head", "a choice after the newest node wins", [chose("n1", 30), "parser"], "n1"],
@@ -155,6 +168,9 @@ const CASES = [
   // checkDeck, schema: field types, enums, required and unknown fields, ids and times.
   ["checkDeck", "valid deck", [deck()], []],
   ["checkDeck", "settings are valid too", [edited((s) => { s.settings = { nvim_server: "/tmp/x.sock" }; })], []],
+  ["checkDeck", "term cards are valid", [withTerms()], []],
+  ["checkDeck", "unknown card kind", [edited((s) => { s.cards.fill.kind = "glossary"; })],
+    ["cards/fill.json: kind is not one of concept, term"]],
   ["checkDeck", "meta is required", [edited((s) => { s.meta = null; })], ["meta.json is missing"]],
   ["checkDeck", "unknown field", [edited((s) => { s.messages.m1.status = "done"; })],
     ["messages/m1.json: status is not a known field"]],
