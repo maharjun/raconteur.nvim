@@ -64,11 +64,13 @@ const chose = (node, second) => edited((s) => { s.heads.parser = { node, at: T(s
 
 const ids = (docs) => docs.map((d) => d.id);
 
-// Two term cards, listed in reading order between and after the concept cards.
-const withTerms = () => edited((s) => {
-  s.cards["t-pass"] = { title: "Pass", body_md: "A walk over the lines.", kind: "term" };
-  s.cards["t-fence"] = { title: "Fence", body_md: "A run of backticks.", kind: "term" };
-  s.meta.order = ["parser", "t-fence", "fill", "t-pass"];
+// Two sections, a plain one and a term one, their cards interleaved with the main sequence.
+const withSections = () => edited((s) => {
+  s.meta.sections = [{ id: "protocol", title: "Protocol" }, { id: "terms", title: "Terms", kind: "term" }];
+  s.cards["t-pass"] = { title: "Pass", body_md: "A walk over the lines.", section: "terms" };
+  s.cards["t-fence"] = { title: "Fence", body_md: "A run of backticks.", section: "terms" };
+  s.cards.framing = { title: "Framing", body_md: "Length, then bytes.", section: "protocol" };
+  s.meta.order = ["parser", "t-fence", "framing", "fill", "t-pass"];
 });
 
 const block = (attrs) => S.parseFenceInfo(`lua file=a.lua lines=2-3 ${attrs}`);
@@ -114,11 +116,16 @@ const CASES = [
   ["parseLink", "script link is refused", ["javascript:alert(1)"], null],
 
   // head: the newer of the user's choice and the card's newest node.
-  // cardKind, cardsOfKind: term cards are listed apart from concept cards, each in reading order.
-  ["cardKind", "a card without a kind is a concept", [{ title: "Parser", body_md: "" }], "concept"],
-  ["cardKind", "a term card", [{ title: "Fence", body_md: "", kind: "term" }], "term"],
-  ["cardsOfKind", "concept cards in order", [withTerms(), "concept"], ["parser", "fill"]],
-  ["cardsOfKind", "term cards in order", [withTerms(), "term"], ["t-fence", "t-pass"]],
+  // sectionOf, cardsInSection, isTermCard: each section is listed apart, in reading order.
+  ["sectionOf", "a card without a section is in the main sequence", [withSections(), { title: "P", body_md: "" }], null],
+  ["sectionOf", "a card's section", [withSections(), { title: "F", body_md: "", section: "protocol" }],
+    { id: "protocol", title: "Protocol" }],
+  ["cardsInSection", "main sequence in order", [withSections(), null], ["parser", "fill"]],
+  ["cardsInSection", "term section in order", [withSections(), "terms"], ["t-fence", "t-pass"]],
+  ["cardsInSection", "plain section", [withSections(), "protocol"], ["framing"]],
+  ["isTermCard", "a card in a term section", [withSections(), "t-pass"], true],
+  ["isTermCard", "a card in a plain section", [withSections(), "framing"], false],
+  ["isTermCard", "a main card", [withSections(), "parser"], false],
 
   ["head", "newest node when nothing was chosen", [deck(), "parser"], "n3"],
   ["head", "never compressed", [deck(), "fill"], null],
@@ -168,9 +175,17 @@ const CASES = [
   // checkDeck, schema: field types, enums, required and unknown fields, ids and times.
   ["checkDeck", "valid deck", [deck()], []],
   ["checkDeck", "settings are valid too", [edited((s) => { s.settings = { nvim_server: "/tmp/x.sock" }; })], []],
-  ["checkDeck", "term cards are valid", [withTerms()], []],
-  ["checkDeck", "unknown card kind", [edited((s) => { s.cards.fill.kind = "glossary"; })],
-    ["cards/fill.json: kind is not one of concept, term"]],
+  ["checkDeck", "sections are valid", [withSections()], []],
+  ["checkDeck", "card names a missing section", [edited((s) => { s.cards.fill.section = "glossary"; })],
+    ["cards/fill.json: section glossary is not in meta.json sections"]],
+  ["checkDeck", "section listed twice", [edited((s) => {
+    s.meta.sections = [{ id: "a", title: "A" }, { id: "a", title: "B" }];
+  })], ["meta.json: sections lists a twice"]],
+  ["checkDeck", "unknown section kind", [edited((s) => {
+    s.meta.sections = [{ id: "a", title: "A", kind: "glossary" }];
+  })], ["meta.json: sections[0].kind is not one of term"]],
+  ["checkDeck", "card kind is no longer a field", [edited((s) => { s.cards.fill.kind = "term"; })],
+    ["cards/fill.json: kind is not a known field"]],
   ["checkDeck", "meta is required", [edited((s) => { s.meta = null; })], ["meta.json is missing"]],
   ["checkDeck", "unknown field", [edited((s) => { s.messages.m1.status = "done"; })],
     ["messages/m1.json: status is not a known field"]],

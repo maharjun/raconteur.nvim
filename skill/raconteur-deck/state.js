@@ -7,6 +7,14 @@
    * @property {string} title
    * @property {string} worktree  Absolute path of the worktree the deck explains.
    * @property {string[]} order  Card ids in reading order; lists every card exactly once.
+   * @property {Section[]} [sections]  Groups of cards set apart from the main sequence, in the
+   *   order the page lists them.
+   *
+   * @typedef {Object} Section  One entry of meta.json's sections.
+   * @property {string} id  What a card's `section` names.
+   * @property {string} title
+   * @property {"term"} [kind]  "term" for a section of term cards: each defines one term, and
+   *   other cards link to it where they first use the term.
    *
    * @typedef {Object} Settings  settings.json, written by the server.
    * @property {string} nvim_server  Neovim server address `goto` opens files in.
@@ -14,8 +22,8 @@
    * @typedef {Object} Card  cards/<id>.json, written by the agent.
    * @property {string} title  For a term card, the term itself.
    * @property {string} body_md
-   * @property {"concept"|"term"} [kind]  "term" for a card that defines one term, which other
-   *   cards link to where they first use it; absent means "concept".
+   * @property {string} [section]  The id of the section the card belongs to; absent puts the
+   *   card in the main sequence.
    *
    * @typedef {Object} Head  heads/<card>.json, written by the server when the user picks a node.
    * @property {string|null} node  Chosen node, or null for the conversation before any compress.
@@ -90,10 +98,20 @@
   /** Field specs per document kind; every field is required unless `optional`, and a document
    *  holds no field the table does not list. */
   const SCHEMA = {
-    meta: { title: text, worktree: text, order: { type: "list", of: id } },
+    meta: {
+      title: text, worktree: text, order: { type: "list", of: id },
+      sections: {
+        type: "list",
+        optional: true,
+        of: {
+          type: "object",
+          fields: { id, title: text, kind: { type: "string", enum: ["term"], optional: true } },
+        },
+      },
+    },
     settings: { nvim_server: text },
     cards: {
-      title: text, body_md: text, kind: { type: "string", enum: ["concept", "term"], optional: true },
+      title: text, body_md: text, section: { type: "id", optional: true },
     },
     heads: { node: { type: "id", nullable: true }, at: time },
     nodes: {
@@ -215,16 +233,25 @@
       })));
   }
 
-  /** A card's kind: "term" for a term card, otherwise "concept". */
-  function cardKind(card) {
-    return card && card.kind === "term" ? "term" : "concept";
+  /** The section a card belongs to, or null for a card in the main sequence. */
+  function sectionOf(state, card) {
+    if (!card || !card.section) return null;
+    return ((state.meta && state.meta.sections) || []).find((s) => s.id === card.section) || null;
   }
 
-  /** The ids of one kind of card, in the deck's reading order. The page lists and steps through
-   *  concept cards and term cards separately. */
-  function cardsOfKind(state, kind) {
-    return ((state.meta && state.meta.order) || [])
-      .filter((cardId) => state.cards[cardId] && cardKind(state.cards[cardId]) === kind);
+  /** The ids of one section's cards (null: the main sequence), in the deck's reading order. The
+   *  page lists and steps through each section separately. */
+  function cardsInSection(state, sectionId) {
+    return ((state.meta && state.meta.order) || []).filter((cardId) => {
+      const section = sectionOf(state, state.cards[cardId]);
+      return state.cards[cardId] && (section ? section.id : null) === sectionId;
+    });
+  }
+
+  /** Whether a card defines a term: it belongs to a section of kind "term". */
+  function isTermCard(state, cardId) {
+    const section = sectionOf(state, state.cards[cardId]);
+    return Boolean(section && section.kind === "term");
   }
 
   /** card://<id> and walkthrough://<path>#<heading> are the deck's own links; http(s) links
@@ -371,13 +398,21 @@
       for (const cardId of Object.keys(state.cards)) {
         if (!meta.order.includes(cardId)) problems.push(`order leaves out card ${cardId}`);
       }
+      const sectionIds = (meta.sections || []).map((s) => s.id);
+      sectionIds.forEach((sectionId, i) => {
+        if (sectionIds.indexOf(sectionId) !== i) problems.push(`sections lists ${sectionId} twice`);
+      });
       return problems;
     },
     settings() {
       return [];
     },
     cards(state, card) {
-      return linkProblems(state, "body_md", card.body_md);
+      const problems = linkProblems(state, "body_md", card.body_md);
+      if (card.section && !sectionOf(state, card)) {
+        problems.push(`section ${card.section} is not in meta.json sections`);
+      }
+      return problems;
     },
     heads(state, chosen, cardId) {
       if (!state.cards[cardId]) return [`card ${cardId} does not exist`];
@@ -458,7 +493,7 @@
 
   globalThis.DeckState = {
     SCHEMA, COLLECTIONS, SINGLETONS, ID, DEFAULT_NVIM_SERVER, REQUEST_ARG,
-    docPath, cardKind, cardsOfKind, parseFenceInfo, dynamicBlocks, blockKey, isOutOfDate, codeDocs, outOfDateBlocks, parseLink, head, conversation, undoTarget, children,
+    docPath, sectionOf, cardsInSection, isTermCard, parseFenceInfo, dynamicBlocks, blockKey, isOutOfDate, codeDocs, outOfDateBlocks, parseLink, head, conversation, undoTarget, children,
     pendingRequests, requestStatus, answerStatus, compressStatus, checkDeck,
   };
 })();

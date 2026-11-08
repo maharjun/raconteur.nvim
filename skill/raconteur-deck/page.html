@@ -89,13 +89,13 @@ code, pre { font-family: var(--font-mono); font-size: 0.8125rem; }
 .rail a .n { color: var(--muted); font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 0.75rem; padding-top: 1px; }
 .rail a:hover { background: var(--accent-soft); }
 .rail a[aria-current="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
-/* Term cards sit apart from the concept cards, closed until wanted. */
-.rail-terms { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); display: grid; gap: 2px; }
-.rail-terms summary {
+/* Each section sits apart from the main sequence, closed until wanted. */
+.rail-section { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); display: grid; gap: 2px; }
+.rail-section summary {
   cursor: pointer; padding: 4px 10px; font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--muted);
 }
-.rail-terms summary:hover { color: var(--accent); }
+.rail-section summary:hover { color: var(--accent); }
 /* The menu's breakpoint is NARROW in the script; there it opens above the card, full width. */
 @media (max-width: 900px) {
   .layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
@@ -300,7 +300,7 @@ details.history summary::-webkit-details-marker { display: none; }
   const railOpen = { wide: true, narrow: false };
   try { Object.assign(railOpen, JSON.parse(localStorage.getItem("raconteur-deck-rail")) || {}); } catch (e) { /* defaults */ }
   let current = null;
-  let termsOpen = false; // whether the user opened the card menu's Terms group
+  const sectionsOpen = {}; // section id -> whether the user opened its group in the card menu
   let loaded = false;
   let lastState = "";
 
@@ -346,7 +346,7 @@ details.history summary::-webkit-details-marker { display: none; }
     if (link.kind === "web") return `<a href="${esc(link.href)}" target="_blank" rel="noopener">${text}</a>`;
     if (link.kind === "card") {
       const target = state.cards[link.id];
-      if (S.cardKind(target) !== "term") return `<a class="deck-link" href="#c-${esc(link.id)}">${text}</a>`;
+      if (!S.isTermCard(state, link.id)) return `<a class="deck-link" href="#c-${esc(link.id)}">${text}</a>`;
       return `<a class="term-link" href="#c-${esc(link.id)}" title="${esc(definition(target))}">${text}</a>`;
     }
     return `<a class="deck-link" href="#" data-walk="${esc(link.path)}" data-heading="${esc(link.heading || "")}">${text}</a>`;
@@ -402,22 +402,29 @@ details.history summary::-webkit-details-marker { display: none; }
     }
     const fromHash = /^#c-(.+)$/.exec(location.hash);
     if (fromHash && state.cards[fromHash[1]]) current = fromHash[1];
-    const concepts = S.cardsOfKind(state, "concept");
-    const terms = S.cardsOfKind(state, "term");
-    if (!state.cards[current]) current = concepts[0] || ids[0];
+    const main = S.cardsInSection(state, null);
+    if (!state.cards[current]) current = main[0] || ids[0];
     const card = state.cards[current];
-    const isTerm = S.cardKind(card) === "term";
-    const siblings = isTerm ? terms : concepts;
+    const section = S.sectionOf(state, card);
+    const siblings = S.cardsInSection(state, section ? section.id : null);
     const index = siblings.indexOf(current);
 
     const item = (id, n) => `<a href="#c-${esc(id)}" aria-current="${id === current}"><span class="n">${n}</span><span>${esc(state.cards[id].title || id)}</span></a>`;
-    $("rail").innerHTML = `<p class="rail-label">Cards</p>` + concepts.map((id, i) => item(id, i + 1)).join("")
-      + (terms.length ? `<details class="rail-terms"${termsOpen || isTerm ? " open" : ""}><summary>Terms (${terms.length})</summary>`
-        + terms.map((id) => item(id, "")).join("") + `</details>` : "");
+    // Term sections are lookups rather than reading sequences, so their cards go unnumbered.
+    const group = (s) => {
+      const members = S.cardsInSection(state, s.id);
+      if (!members.length) return "";
+      const open = sectionsOpen[s.id] || (section && section.id === s.id);
+      return `<details class="rail-section" data-section="${esc(s.id)}"${open ? " open" : ""}>`
+        + `<summary>${esc(s.title)} (${members.length})</summary>`
+        + members.map((id, i) => item(id, s.kind === "term" ? "" : i + 1)).join("") + `</details>`;
+    };
+    $("rail").innerHTML = `<p class="rail-label">Cards</p>` + main.map((id, i) => item(id, i + 1)).join("")
+      + ((state.meta && state.meta.sections) || []).map(group).join("");
 
     $("empty").hidden = true;
     $("card-inner").hidden = false;
-    $("eyebrow").textContent = `${isTerm ? "Term" : "Card"} ${index + 1} of ${siblings.length}`;
+    $("eyebrow").textContent = `${section ? section.title + " ·" : "Card"} ${index + 1} of ${siblings.length}`;
     $("card-title").textContent = card.title || current;
     $("prev").disabled = index === 0;
     $("next").disabled = index === siblings.length - 1;
@@ -636,12 +643,15 @@ details.history summary::-webkit-details-marker { display: none; }
   $("rail").addEventListener("click", (e) => { if (e.target.closest("a") && NARROW.matches) showRail(false); });
   NARROW.addEventListener("change", renderRail);
   window.addEventListener("hashchange", render);
-  // Remember the Terms group's open state across renders; toggle doesn't bubble, so capture it.
-  $("rail").addEventListener("toggle", (e) => { if (e.target.matches(".rail-terms")) termsOpen = e.target.open; }, true);
+  // Remember each section group's open state across renders; toggle doesn't bubble, so capture it.
+  $("rail").addEventListener("toggle", (e) => {
+    if (e.target.matches(".rail-section")) sectionsOpen[e.target.dataset.section] = e.target.open;
+  }, true);
 
-  /** Moves through the current card's own kind: concept cards, or term cards. */
+  /** Moves through the current card's own section, or through the main sequence. */
   function step(delta) {
-    const ids = S.cardsOfKind(state, S.cardKind(state.cards[current]));
+    const section = S.sectionOf(state, state.cards[current]);
+    const ids = S.cardsInSection(state, section ? section.id : null);
     const next = ids[ids.indexOf(current) + delta];
     if (next) location.hash = "c-" + next;
   }

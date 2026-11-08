@@ -34,8 +34,8 @@ file, and holds exactly the fields listed here; `deck.mjs check` rejects anythin
 
 | Document | Written by | Fields |
 |---|---|---|
-| `meta.json` | you | `title`; `worktree` (absolute path); `order` (every card id once, in reading order) |
-| `cards/<id>.json` | you | `title`; `body_md`; `kind` (optional: `"term"` for a term card) |
+| `meta.json` | you | `title`; `worktree` (absolute path); `order` (every card id once, in reading order); `sections` (optional: `[{id, title, kind}]`, `kind` optional) |
+| `cards/<id>.json` | you | `title`; `body_md`; `section` (optional: a section id) |
 | `messages/<id>.json` | the server for `role: "user"`, you for `role: "claude"` | `card_id`; `role`; `body_md`; `created_at` |
 | `nodes/<id>.json` | you, once per compress | `card_id`; `parent` (a node id or null); `upto` (a message id); `digest`; `created_at` |
 | `results/<request-id>.json` | you | `status` (`"done"` or `"error"`); `error` (a sentence, only with `"error"`); `created_at` |
@@ -89,14 +89,28 @@ the new lines but leaves the prose as it is, so read the new lines first and dec
 - The prose no longer holds: rewrite the card, then `fill`. A message is the record of a past
   answer, so leave it; say what changed in your next reply on that card if it matters.
 
+## Sections
+
+A section is a group of cards that are read differently from the main sequence: a reader looks
+them up when a main card leads there, instead of reading them in turn. Declare each one in
+`meta.json`'s `sections` with an `id` and a `title`, and put a card in it with `"section": "<id>"`.
+A card without a section is in the main sequence. The page lists the main sequence first, then
+each section as a closed group in the card menu, in the order `sections` gives; previous and next
+stay within the current card's group.
+
+Add a section when several cards share one kind of content that a main card would otherwise
+explain in passing. For example, a "Cross-boundary protocol" section holds what two programs
+agree on to talk to each other: names, message shapes, and who sends what when. A main card then
+links to the protocol card instead of restating it.
+
 ## Term cards
 
 A term card defines one term that the deck uses: an identifier like `_gate`, a project word like
-"job", or outside jargon like "STA". It is an ordinary card with `"kind": "term"`. Its `title` is
-the term, and its body starts with one sentence of the form "a <noun> that ...", which the page
-also shows when the reader hovers over a link to it. Code blocks may follow. Its id is `t-` and
-the term in kebab case. The page lists term cards apart from the concept cards, under Terms in
-the card menu, so a reader starts with the concepts and opens a term when they meet it.
+"job", or outside jargon like "STA". Term cards belong to a section with `"kind": "term"`
+(`{"id": "terms", "title": "Terms", "kind": "term"}`); the kind changes only how links to them
+look. A term card's `title` is the term, and its body starts with one sentence of the form
+"a <noun> that ...", which the page also shows when the reader hovers over a link to it. Code
+blocks may follow. Its id is `t-` and the term in kebab case.
 
 Link the first use of each term in every card body and every reply to its term card, including
 first uses inside other term cards: `[job](card://t-job)`, `` [`_gate`](card://t-gate) ``.
@@ -113,7 +127,8 @@ punctuation other than `-` and `_`, spaces become `-` (`## 3. Parsing` is `3-par
 1. Pick two or three concepts, each tied to a small code range.
 2. Write each card with empty dynamic blocks, and run `fill` on it.
 3. Write a term card for each term the cards use, and link each term's first use in every card.
-4. Write `meta.json`, with the concept cards and then the term cards in `order`.
+4. Write `meta.json`: `order` lists the main cards, then each section's cards; `sections`
+   declares the term section and any other.
 5. Run `check` and fix what it prints.
 6. Start the server with Bash `run_in_background` and give the user the URL it prints.
 7. Tell the user to start Neovim in the worktree with `nvim --listen /tmp/raconteur-deck.sock`.
