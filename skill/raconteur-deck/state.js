@@ -254,6 +254,12 @@
     return Boolean(section && section.kind === "term");
   }
 
+  /** A term card's definition: the first paragraph of its body, as markdown, links kept. The
+   *  page shows it when the reader hovers over a link to the card. */
+  function definitionOf(card) {
+    return (card.body_md || "").trim().split(/\n\s*\n/)[0];
+  }
+
   /** card://<id> and walkthrough://<path>#<heading> are the deck's own links; http(s) links
    *  open in a new tab; anything else is not followed. */
   function parseLink(href) {
@@ -493,7 +499,7 @@
 
   globalThis.DeckState = {
     SCHEMA, COLLECTIONS, SINGLETONS, ID, DEFAULT_NVIM_SERVER, REQUEST_ARG,
-    docPath, sectionOf, cardsInSection, isTermCard, parseFenceInfo, dynamicBlocks, blockKey, isOutOfDate, codeDocs, outOfDateBlocks, parseLink, head, conversation, undoTarget, children,
+    docPath, sectionOf, cardsInSection, isTermCard, definitionOf, parseFenceInfo, dynamicBlocks, blockKey, isOutOfDate, codeDocs, outOfDateBlocks, parseLink, head, conversation, undoTarget, children,
     pendingRequests, requestStatus, answerStatus, compressStatus, checkDeck,
   };
 })();

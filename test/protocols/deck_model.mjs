@@ -126,6 +126,13 @@ const CASES = [
   ["isTermCard", "a card in a term section", [withSections(), "t-pass"], true],
   ["isTermCard", "a card in a plain section", [withSections(), "framing"], false],
   ["isTermCard", "a main card", [withSections(), "parser"], false],
+  // definitionOf: the first paragraph, however many sentences, with its links.
+  ["definitionOf", "the first paragraph of several sentences, links kept",
+    [{ title: "Job", body_md: "A unit of work that a [pass](card://t-pass) runs.\nIt waits for its gate.\n\nMore." }],
+    "A unit of work that a [pass](card://t-pass) runs.\nIt waits for its gate."],
+  ["definitionOf", "a body of one paragraph", [{ title: "Pass", body_md: "A walk over the lines.\n" }],
+    "A walk over the lines."],
+  ["definitionOf", "an empty body", [{ title: "Gate", body_md: "" }], ""],
 
   ["head", "newest node when nothing was chosen", [deck(), "parser"], "n3"],
   ["head", "never compressed", [deck(), "fill"], null],

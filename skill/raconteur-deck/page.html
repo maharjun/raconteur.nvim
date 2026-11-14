@@ -60,6 +60,16 @@ a.term-link {
   color: inherit; text-decoration: underline dotted 1px var(--gutter); text-underline-offset: 3px;
 }
 a.term-link:hover { color: var(--accent); text-decoration-color: currentColor; }
+/* A term's definition, shown beside a link to it; its own links work. */
+.term-pop {
+  position: fixed; z-index: 20; max-width: min(28rem, calc(100vw - 32px));
+  padding: 0.625rem 0.875rem; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--fg); box-shadow: 0 6px 24px rgb(0 0 0 / 0.14);
+  font-size: var(--step--1); line-height: 1.55;
+}
+.term-pop p { margin: 0 0 0.4em; }
+.term-pop p:last-child { margin-bottom: 0; }
+.term-pop .term-pop-title { font-weight: 600; }
 code, pre { font-family: var(--font-mono); font-size: 0.8125rem; }
 
 .shell { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
@@ -281,6 +291,8 @@ details.history summary::-webkit-details-marker { display: none; }
   </div>
 </div>
 
+<div class="term-pop" id="term-pop" role="tooltip" hidden></div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="state.js"></script>
@@ -334,20 +346,13 @@ details.history summary::-webkit-details-marker { display: none; }
     </figure>`;
   }
 
-  /** A term card's definition as plain text: its first paragraph, without markdown marks. */
-  function definition(card) {
-    const first = (card.body_md || "").trim().split(/\n\s*\n/)[0];
-    return first.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*_]/g, "");
-  }
-
   function linkHtml(href, title, text) {
     const link = S.parseLink(href);
     if (!link) return text;
     if (link.kind === "web") return `<a href="${esc(link.href)}" target="_blank" rel="noopener">${text}</a>`;
     if (link.kind === "card") {
-      const target = state.cards[link.id];
       if (!S.isTermCard(state, link.id)) return `<a class="deck-link" href="#c-${esc(link.id)}">${text}</a>`;
-      return `<a class="term-link" href="#c-${esc(link.id)}" title="${esc(definition(target))}">${text}</a>`;
+      return `<a class="term-link" href="#c-${esc(link.id)}" data-term="${esc(link.id)}">${text}</a>`;
     }
     return `<a class="deck-link" href="#" data-walk="${esc(link.path)}" data-heading="${esc(link.heading || "")}">${text}</a>`;
   }
@@ -638,6 +643,56 @@ details.history summary::-webkit-details-marker { display: none; }
     if (e.key === "ArrowLeft") step(-1);
     if (e.key === "ArrowRight") step(1);
   });
+  // ---------- term definitions ----------
+  // A term link opens its definition after a short hover, or at once on focus. The popover stays
+  // open while the pointer moves from the link into it, so its own links can be followed.
+  const pop = $("term-pop");
+  const POP_OPEN_MS = 250;
+  const POP_CLOSE_MS = 200;
+  let popTerm = null;
+  let popTimer = null;
+  function showTerm(link) {
+    const card = state.cards[link.dataset.term];
+    if (!card) return hideTerm();
+    popTerm = link.dataset.term;
+    pop.innerHTML = `<p class="term-pop-title">${esc(card.title || popTerm)}</p>` + md(S.definitionOf(card));
+    pop.hidden = false;
+    const at = link.getBoundingClientRect();
+    const size = pop.getBoundingClientRect();
+    const fitsBelow = at.bottom + 6 + size.height <= innerHeight;
+    pop.style.left = Math.max(8, Math.min(at.left, innerWidth - size.width - 8)) + "px";
+    pop.style.top = (fitsBelow ? at.bottom + 6 : Math.max(8, at.top - 6 - size.height)) + "px";
+  }
+  function hideTerm() {
+    clearTimeout(popTimer);
+    popTerm = null;
+    pop.hidden = true;
+  }
+  function popAfter(ms, action) {
+    clearTimeout(popTimer);
+    popTimer = setTimeout(action, ms);
+  }
+  const inPop = (target) => target instanceof Element && Boolean(target.closest("#term-pop"));
+  document.addEventListener("mouseover", (e) => {
+    if (inPop(e.target)) return clearTimeout(popTimer);
+    const link = e.target.closest("a.term-link");
+    if (link && link.dataset.term === popTerm) return clearTimeout(popTimer);
+    if (link) return popAfter(POP_OPEN_MS, () => showTerm(link));
+    if (popTerm) popAfter(POP_CLOSE_MS, hideTerm);
+    else clearTimeout(popTimer);
+  });
+  document.addEventListener("focusin", (e) => {
+    if (inPop(e.target)) return clearTimeout(popTimer);
+    const link = e.target.closest("a.term-link");
+    if (link) {
+      clearTimeout(popTimer);
+      showTerm(link);
+    } else if (popTerm) hideTerm();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && popTerm) hideTerm(); });
+  document.addEventListener("scroll", (e) => { if (popTerm && !inPop(e.target)) hideTerm(); }, true);
+  window.addEventListener("hashchange", hideTerm);
+
   $("rail-toggle").addEventListener("click", () => showRail(!railOpen[railMode()]));
   // Above the card the menu pushes the card down, so choosing a card closes it.
   $("rail").addEventListener("click", (e) => { if (e.target.closest("a") && NARROW.matches) showRail(false); });

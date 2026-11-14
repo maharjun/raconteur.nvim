@@ -108,9 +108,12 @@ links to the protocol card instead of restating it.
 A term card defines one term that the deck uses: an identifier like `_gate`, a project word like
 "job", or outside jargon like "STA". Term cards belong to a section with `"kind": "term"`
 (`{"id": "terms", "title": "Terms", "kind": "term"}`); the kind changes only how links to them
-look. A term card's `title` is the term, and its body starts with one sentence of the form
-"a <noun> that ...", which the page also shows when the reader hovers over a link to it. Code
-blocks may follow. Its id is `t-` and the term in kebab case.
+look. A term card's `title` is the term, and its body starts with a short paragraph, one to
+three sentences, that defines it: the first sentence has the form "a <noun> that ...", and the
+others say what the term is for or give an example. Split a definition that would be one long
+sentence into several. The page shows this paragraph, with working links, when the reader
+hovers over a link to the card, so link the terms it uses as anywhere else. More paragraphs and
+code blocks may follow. Its id is `t-` and the term in kebab case.
 
 Link the first use of each term in every card body and every reply to its term card, including
 first uses inside other term cards: `[job](card://t-job)`, `` [`_gate`](card://t-gate) ``.
