@@ -125,27 +125,49 @@ function M.goto(request)
   return result
 end
 
---- Fill every dynamic block in the `body_md` of the deck document at `path` with the worktree's
---- current lines, stamped with the short HEAD and the hash of the copied lines. The document is rewritten whole (temp file and
---- rename) only when its body changed, so an unchanged document keeps its bytes.
+--- Write `text` to `path` whole, through a temp file and a rename.
+--- @return string|nil error
+local function replace_file(path, text)
+  local temp = path .. ".tmp"
+  local file = assert(io.open(temp, "wb"))
+  file:write(text)
+  file:close()
+  local renamed, err = vim.uv.fs_rename(temp, path)
+  if not renamed then return "Can't write " .. path .. ": " .. err end
+end
+
+--- Fill every dynamic block of the deck document at `path` with the worktree's current lines,
+--- stamped with the short HEAD and the hash of the copied lines: the whole file of a card
+--- (`.md`, whose front matter holds no fences), or the `body_md` of a JSON document such as a
+--- message. The file is rewritten whole only when it changed, so an unchanged one keeps its
+--- bytes.
 --- @return table { ok, sha, changed } or { ok = false, error }
 function M.fill(worktree, path)
   local root = normalize(worktree)
   local code, head = git(root, { "rev-parse", "--short", "HEAD" })
   if code ~= 0 then return { ok = false, error = root .. " is not a git worktree." } end
   if vim.fn.filereadable(path) ~= 1 then return { ok = false, error = "Can't read " .. path .. "." } end
-  local parsed, doc = pcall(vim.json.decode, table.concat(vim.fn.readfile(path, "b"), "\n"))
-  if not parsed or type(doc) ~= "table" or type(doc.body_md) ~= "string" then
-    return { ok = false, error = path .. " is not a deck document with a body_md." }
+  local text = table.concat(vim.fn.readfile(path, "b"), "\n")
+  local fill = function(body)
+    local lines = vim.split(body, "\n", { plain = true })
+    return table.concat(require("raconteur.fill").fill_lines(lines, root, { sha = head }), "\n")
   end
-  local lines = vim.split(doc.body_md, "\n", { plain = true })
-  local body = table.concat(require("raconteur.fill").fill_lines(lines, root, { sha = head }), "\n")
-  if body == doc.body_md then return { ok = true, sha = head, changed = false } end
-  doc.body_md = body
-  local temp = path .. ".tmp"
-  vim.fn.writefile({ vim.json.encode(doc) }, temp)
-  local renamed, err = vim.uv.fs_rename(temp, path)
-  if not renamed then return { ok = false, error = "Can't write " .. path .. ": " .. err } end
+  local filled
+  if path:match("%.md$") then
+    filled = fill(text)
+  else
+    local parsed, doc = pcall(vim.json.decode, text)
+    if not parsed or type(doc) ~= "table" or type(doc.body_md) ~= "string" then
+      return { ok = false, error = path .. " is not a deck document with a body_md." }
+    end
+    local body = fill(doc.body_md)
+    if body == doc.body_md then return { ok = true, sha = head, changed = false } end
+    doc.body_md = body
+    filled = vim.json.encode(doc) .. "\n"
+  end
+  if filled == text then return { ok = true, sha = head, changed = false } end
+  local failed = replace_file(path, filled)
+  if failed then return { ok = false, error = failed } end
   return { ok = true, sha = head, changed = true }
 end
 

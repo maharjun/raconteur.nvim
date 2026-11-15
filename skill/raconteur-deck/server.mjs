@@ -1,6 +1,7 @@
 // Local deck server: serves the page and turns each page action into whole-document writes in
-// the deck folder. It is the only writer of settings, heads, user messages, requests and
-// inbox.log; the agent writes everything else (see the @typedefs in state.js).
+// the deck folder and its library. It is the only writer of settings, heads, user messages,
+// requests and inbox.log, and commits the code refills it makes; the agent writes everything
+// else (see the @typedefs in state.js).
 //
 //   node server.mjs <deck-dir> [port]       prints the page's URL
 import fs from "node:fs";
@@ -8,7 +9,7 @@ import http from "node:http";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { codeHashes, readDeck, writeDoc } from "./folder.mjs";
+import { cardDiff, cardRepo, codeHashes, commitCards, readDeck, readStore, writeDoc } from "./folder.mjs";
 
 const S = globalThis.DeckState;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -38,9 +39,9 @@ function refuse(sentence) {
   throw new Error(sentence);
 }
 
-/** The card a request names, refused unless it is an existing card. */
+/** The card a request names, refused unless the deck can show it. */
 function cardOf(state, cardId) {
-  if (typeof cardId !== "string" || !S.ID.test(cardId) || !Object.hasOwn(state.cards, cardId)) {
+  if (typeof cardId !== "string" || !S.ID.test(cardId) || !S.cardOf(state, cardId)) {
     refuse("That card no longer exists.");
   }
   return cardId;
@@ -82,16 +83,16 @@ function relay(command, request) {
   });
 }
 
-/** The deck as the page draws it, plus the worktree's current branch (null when git can't
- *  say) and the hashes of the lines its blocks copy (`code_hashes`), read live so they are
- *  never stale. */
+/** The deck and its library as the page draws them, plus the worktree's current branch (null
+ *  when git can't say), the hashes of the lines its blocks copy (`code_hashes`) and what git
+ *  says about the cards (`store`), read live so they are never stale. */
 function getState() {
   const state = readState();
   const worktree = state.meta && state.meta.worktree;
   const git = worktree
     && spawnSync("git", ["-C", worktree, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" });
   const branch = git && git.status === 0 ? git.stdout.trim() : null;
-  return { ...state, branch, code_hashes: codeHashes(state) };
+  return { ...state, branch, code_hashes: codeHashes(state), store: readStore(dir) };
 }
 
 /** Saves the user's question and asks the agent to answer it; the message is written before
@@ -101,7 +102,7 @@ function ask({ card_id, body_md }) {
   if (typeof body_md !== "string" || !body_md.trim()) refuse("The message is empty.");
   const at = new Date().toISOString();
   const message = newId("m-");
-  const doc = { card_id: cardId, role: "user", body_md, created_at: at };
+  const doc = { conversation: S.conversationOf(readState(), cardId), role: "user", body_md, created_at: at };
   writeDoc(dir, S.docPath("messages", message), doc);
   return { ok: true, message, request: createRequest("answer", cardId, message, at) };
 }
@@ -117,15 +118,15 @@ function compress({ card_id, upto }) {
   return { ok: true, request: createRequest("compress", cardId, upto, new Date().toISOString()) };
 }
 
-/** Records the user's choice of head for a card (undo or a history branch): null or one of the
- *  card's nodes. */
+/** Records the user's choice of head for the conversation under a card (undo or a history
+ *  branch): null or one of the conversation's nodes. */
 function setHead({ card_id, node }) {
   const state = readState();
-  const cardId = cardOf(state, card_id);
-  const ofCard = typeof node === "string" && Object.hasOwn(state.nodes, node)
-    && state.nodes[node].card_id === cardId;
-  if (node !== null && !ofCard) refuse("That point in the history no longer exists.");
-  writeDoc(dir, S.docPath("heads", cardId), { node, at: new Date().toISOString() });
+  const conversation = S.conversationOf(state, cardOf(state, card_id));
+  const ofConversation = typeof node === "string" && Object.hasOwn(state.nodes, node)
+    && state.nodes[node].conversation === conversation;
+  if (node !== null && !ofConversation) refuse("That point in the history no longer exists.");
+  writeDoc(dir, S.docPath("heads", conversation), { node, at: new Date().toISOString() });
   return { ok: true };
 }
 
@@ -146,17 +147,41 @@ function goTo({ file, line, heading, sha }) {
   return relay("goto", { server, worktree: worktreeOf(state), file, line, heading, sha });
 }
 
-/** Refills a card's code copies from the worktree through the same relay `fill` the agent
- *  runs, and says which commit they now match. */
+/** Refills the code copies of the card the deck shows from the worktree, through the same
+ *  relay `fill` the agent runs, commits the change, and says which commit they now match. */
 async function refresh({ card_id }) {
   const state = readState();
   const cardId = cardOf(state, card_id);
-  const card = path.join(dir, S.docPath("cards", cardId));
+  const shown = S.shownId(state, cardId);
+  const card = path.join(cardRepo(dir), `${shown}.md`);
   const filled = await relay("fill", { worktree: worktreeOf(state), path: card });
   if (!filled.ok) return filled;
-  const note = filled.changed
-    ? `Code copies updated to ${filled.sha}.` : `Code copies already match ${filled.sha}.`;
-  return { ok: true, note };
+  if (!filled.changed) return { ok: true, note: `Code copies already match ${filled.sha}.` };
+  commitCards(dir, `Refill the code copies of ${shown} at ${filled.sha}`,
+    { Cause: "refill", Deck: state.deck, Card: cardId });
+  return { ok: true, note: `Code copies updated to ${filled.sha}.` };
+}
+
+/** Asks the agent to bring this deck's fork of a card up to the original's newest commit; the
+ *  original must have changed since the fork was made or last reconciled. */
+function reconcile({ card_id }) {
+  const state = readState();
+  const cardId = cardOf(state, card_id);
+  const status = S.forkStatus(state, readStore(dir), cardId);
+  if (!status) refuse("This deck shows the shared card, not a copy of it.");
+  if (!status.behind) refuse("This deck's copy already matches the shared card.");
+  return { ok: true, request: createRequest("reconcile", cardId, status.latest, new Date().toISOString()) };
+}
+
+/** The change one commit of the card's history made to the card file the deck shows. */
+function diff({ card_id, commit }) {
+  const state = readState();
+  const shown = S.shownId(state, cardOf(state, card_id));
+  const commits = readStore(dir).history[shown] || [];
+  if (typeof commit !== "string" || !commits.some((c) => c.commit === commit)) {
+    refuse("That commit is not in this card's history.");
+  }
+  return { ok: true, diff: cardDiff(dir, shown, commit) };
 }
 
 /** One route per page action: each takes the request's JSON body and returns its JSON reply.
@@ -169,6 +194,8 @@ const ROUTES = {
   "POST /api/settings": setSettings,
   "POST /api/goto": goTo,
   "POST /api/refresh": refresh,
+  "POST /api/reconcile": reconcile,
+  "POST /api/diff": diff,
 };
 
 const server = http.createServer((req, res) => {

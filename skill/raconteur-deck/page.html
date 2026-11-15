@@ -221,6 +221,29 @@ details.history summary::-webkit-details-marker { display: none; }
 .history-list button[aria-current="true"] { background: var(--accent-soft); color: var(--accent); }
 .history-list small { color: var(--muted); font-size: 0.6875rem; }
 
+/* Where the card's text came from: its last commit, and for a deck's own copy of a shared card,
+   whether the shared card has moved on. */
+.card-origin { margin: 0; color: var(--muted); font-size: var(--step--1); }
+.fork-note {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 8px; font-size: var(--step--1);
+}
+.fork-note[data-behind="true"] { border-color: var(--warn); }
+.fork-note[data-behind="true"] #fork-text { color: var(--warn); }
+.fork-note #fork-text { margin-right: auto; }
+
+/* The card's commits, newest first; choosing one shows the change it made. */
+details.card-log summary { cursor: pointer; color: var(--muted); font-size: var(--step--1); }
+details.card-log summary:hover { color: var(--accent); }
+.card-log-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 2px; }
+.card-log-list button {
+  border: 0; text-align: left; white-space: normal; display: grid; gap: 1px; padding: 6px 8px; width: 100%;
+}
+.card-log-list button[aria-current="true"] { background: var(--accent-soft); color: var(--accent); }
+.card-log-list small { color: var(--muted); font-size: 0.6875rem; }
+.card-diff { margin: 8px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); overflow-x: auto; }
+.hljs-addition { color: var(--ok); } .hljs-deletion { color: var(--err); }
+
 .empty { padding: 48px clamp(16px, 4vw, 40px); display: grid; gap: 8px; max-width: 60ch; }
 .empty h1 { font: 600 var(--step-2)/1.2 var(--font-display); margin: 0; }
 .empty p { margin: 0; color: var(--muted); }
@@ -258,9 +281,20 @@ details.history summary::-webkit-details-marker { display: none; }
             </div>
           </div>
           <h1 id="card-title"></h1>
+          <p class="card-origin" id="card-origin"></p>
           <p class="notice" id="refresh-status" hidden></p>
         </div>
+        <p class="fork-note" id="fork-note" hidden>
+          <span id="fork-text"></span>
+          <span id="reconcile-status" hidden></span>
+          <button id="reconcile" type="button">Ask Claude to reconcile</button>
+        </p>
         <div class="prose" id="body"></div>
+        <details class="card-log" id="card-log" hidden>
+          <summary id="card-log-label">Card history</summary>
+          <ol class="card-log-list" id="card-log-list"></ol>
+          <pre class="card-diff" id="card-diff" hidden><code id="card-diff-code"></code></pre>
+        </details>
         <section class="talk" aria-labelledby="talk-label">
           <div class="talk-head">
             <h2 id="talk-label">Conversation</h2>
@@ -302,10 +336,11 @@ details.history summary::-webkit-details-marker { display: none; }
   const $ = (id) => document.getElementById(id);
   const OFFLINE = "The deck server isn't answering. Ask Claude to start it again.";
   // An empty deck until the server's first reply.
-  let state = Object.fromEntries([...S.SINGLETONS.map((k) => [k, null]), ...S.COLLECTIONS.map((k) => [k, {}]), ["branch", null], ["code_hashes", {}]]);
+  let state = Object.fromEntries([...S.SINGLETONS.map((k) => [k, null]), ...S.COLLECTIONS.map((k) => [k, {}]), ["branch", null], ["code_hashes", {}], ["store", { history: {}, uncommitted: [] }]]);
   const drafts = {};
   const blockStatus = {};  // "<file>:<line>" -> { kind, text } from the last "Open in Neovim"
   const refreshNotes = {}; // card id -> { kind, text } from the last "Refresh code"
+  let shownDiff = null;    // { card, commit, text } of the commit whose change the card history shows
   const NARROW = matchMedia("(max-width: 900px)");
   /** Whether the card menu is open, kept apart for wide and narrow windows: beside the card
    *  it stays open, above the card it opens only when asked. */
@@ -368,7 +403,7 @@ details.history summary::-webkit-details-marker { display: none; }
   const md = (text) => marked.parse(text || "");
 
   // ---------- derived state ----------
-  const order = () => ((state.meta && state.meta.order) || []).filter((id) => state.cards[id]);
+  const order = () => S.deckCards(state).filter((id) => S.cardOf(state, id));
   const when = (iso) => {
     const d = new Date(iso);
     return isNaN(d) ? "" : d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -406,30 +441,34 @@ details.history summary::-webkit-details-marker { display: none; }
       return;
     }
     const fromHash = /^#c-(.+)$/.exec(location.hash);
-    if (fromHash && state.cards[fromHash[1]]) current = fromHash[1];
+    if (fromHash && S.cardOf(state, fromHash[1])) current = fromHash[1];
     const main = S.cardsInSection(state, null);
-    if (!state.cards[current]) current = main[0] || ids[0];
-    const card = state.cards[current];
-    const section = S.sectionOf(state, card);
-    const siblings = S.cardsInSection(state, section ? section.id : null);
+    if (!S.cardOf(state, current)) current = main[0] || ids[0];
+    const card = S.cardOf(state, current);
+    // A link can open a library card this deck doesn't list; it stands alone, outside the menu.
+    const inDeck = ids.includes(current);
+    const section = S.sectionOf(state, current);
+    const siblings = inDeck ? S.cardsInSection(state, section ? section.id : null) : [current];
     const index = siblings.indexOf(current);
 
-    const item = (id, n) => `<a href="#c-${esc(id)}" aria-current="${id === current}"><span class="n">${n}</span><span>${esc(state.cards[id].title || id)}</span></a>`;
-    // Term sections are lookups rather than reading sequences, so their cards go unnumbered.
+    const item = (id, n) => `<a href="#c-${esc(id)}" aria-current="${id === current}"><span class="n">${n}</span><span>${esc(S.cardOf(state, id).title || id)}</span></a>`;
+    // A section of term cards is a lookup rather than a reading sequence, so it goes unnumbered.
     const group = (s) => {
       const members = S.cardsInSection(state, s.id);
       if (!members.length) return "";
       const open = sectionsOpen[s.id] || (section && section.id === s.id);
+      const terms = members.every((id) => S.isTermCard(state, id));
       return `<details class="rail-section" data-section="${esc(s.id)}"${open ? " open" : ""}>`
         + `<summary>${esc(s.title)} (${members.length})</summary>`
-        + members.map((id, i) => item(id, s.kind === "term" ? "" : i + 1)).join("") + `</details>`;
+        + members.map((id, i) => item(id, terms ? "" : i + 1)).join("") + `</details>`;
     };
     $("rail").innerHTML = `<p class="rail-label">Cards</p>` + main.map((id, i) => item(id, i + 1)).join("")
       + ((state.meta && state.meta.sections) || []).map(group).join("");
 
     $("empty").hidden = true;
     $("card-inner").hidden = false;
-    $("eyebrow").textContent = `${section ? section.title + " ·" : "Card"} ${index + 1} of ${siblings.length}`;
+    $("eyebrow").textContent = inDeck
+      ? `${section ? section.title + " ·" : "Card"} ${index + 1} of ${siblings.length}` : "Outside this deck";
     $("card-title").textContent = card.title || current;
     $("prev").disabled = index === 0;
     $("next").disabled = index === siblings.length - 1;
@@ -441,6 +480,8 @@ details.history summary::-webkit-details-marker { display: none; }
       $("refresh-status").className = "notice state-" + refresh.kind;
       $("refresh-status").textContent = refresh.text;
     }
+    renderOrigin();
+    renderCardLog();
     renderTalk();
     document.querySelectorAll("figure[data-file]").forEach((fig) => {
       const status = blockStatus[fig.dataset.file + ":" + fig.dataset.line];
@@ -452,11 +493,56 @@ details.history summary::-webkit-details-marker { display: none; }
     });
   }
 
+  /** What made a commit, in words: its cause and the deck it was made from. */
+  function describe(commit) {
+    const t = commit.trailers || {};
+    const where = !t.Deck ? "" : t.Deck === state.deck ? " in this deck" : ` in deck ${t.Deck}`;
+    const why = {
+      authored: "when it was written", edit: "by an edit", refill: "when its code copies were refilled",
+      answer: "while answering a question", compress: "by compressing a conversation",
+      reconcile: "when this copy was reconciled with the shared card",
+    }[t.Cause] || "by a change";
+    return why + where;
+  }
+
+  /** The card's last change, and for a deck's own copy, whether the shared card moved on. */
+  function renderOrigin() {
+    const commits = state.store.history[S.shownId(state, current)] || [];
+    $("card-origin").textContent = commits.length
+      ? `Last changed ${when(commits[0].at)} ${describe(commits[0])}.` : "Not committed yet.";
+    const fork = S.forkStatus(state, state.store, current);
+    $("fork-note").hidden = !fork;
+    if (!fork) return;
+    $("fork-note").dataset.behind = String(fork.behind);
+    $("fork-text").textContent = fork.behind
+      ? `This deck shows its own copy of the shared card ${fork.original}, which has changed since the copy was made.`
+      : `This deck shows its own copy of the shared card ${fork.original}, up to date with it.`;
+    const status = S.reconcileStatus(state, current);
+    const waiting = !!status && status.status === "waiting";
+    $("reconcile-status").innerHTML = statusTag(status, "Reconcile failed");
+    $("reconcile-status").hidden = !$("reconcile-status").innerHTML;
+    $("reconcile").hidden = !fork.behind;
+    $("reconcile").disabled = waiting;
+  }
+
+  /** The card's commits, newest first, and the change of the one the reader chose. */
+  function renderCardLog() {
+    const commits = state.store.history[S.shownId(state, current)] || [];
+    $("card-log").hidden = !commits.length;
+    $("card-log-label").textContent = `Card history (${commits.length} ${commits.length === 1 ? "change" : "changes"})`;
+    const chosen = shownDiff && shownDiff.card === current ? shownDiff : null;
+    $("card-log-list").innerHTML = commits.map((c) =>
+      `<li><button type="button" data-commit="${esc(c.commit)}" aria-current="${!!chosen && chosen.commit === c.commit}">`
+      + `<span>${esc(c.subject)}</span><small>${esc(when(c.at))} · ${esc(describe(c))} · ${esc(c.commit.slice(0, 7))}</small></button></li>`).join("");
+    $("card-diff").hidden = !chosen;
+    if (chosen) $("card-diff-code").innerHTML = highlight(chosen.text, "diff");
+  }
+
   function renderTalk() {
     const conv = S.conversation(state, current);
     $("digest").hidden = !conv.digest.length;
     $("digest").innerHTML = conv.digest.map((e) => {
-      const target = state.cards[e.card_id];
+      const target = S.cardOf(state, e.card_id);
       return `<a href="#c-${esc(e.card_id)}"><span class="kind ${esc(e.kind)}">${e.kind === "concept" ? "Concept" : "Question"}</span>` +
         `<span>${esc(e.text)}</span><span class="to">${esc(target ? target.title : e.card_id)} →</span></a>`;
     }).join("");
@@ -609,6 +695,22 @@ details.history summary::-webkit-details-marker { display: none; }
     refreshNotes[card] = r.ok ? { kind: "ok", text: r.note } : { kind: "err", text: r.error };
     await poll(); render();
   });
+  $("reconcile").addEventListener("click", () =>
+    act("/api/reconcile", { card_id: current }, "Reconcile wasn't requested"));
+  $("card-log-list").addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-commit]");
+    if (!b) return;
+    const card = current;
+    const commit = b.dataset.commit;
+    if (shownDiff && shownDiff.card === card && shownDiff.commit === commit) {
+      shownDiff = null;
+      return render();
+    }
+    const r = await api("/api/diff", { card_id: card, commit });
+    if (!r.ok) return note(`The change wasn't shown: ${r.error}`, "err");
+    shownDiff = { card, commit, text: r.diff };
+    render();
+  });
   $("compress").addEventListener("click", () => {
     const live = S.conversation(state, current).messages;
     act("/api/compress", { card_id: current, upto: live[live.length - 1].id }, "Compression wasn't requested");
@@ -652,7 +754,7 @@ details.history summary::-webkit-details-marker { display: none; }
   let popTerm = null;
   let popTimer = null;
   function showTerm(link) {
-    const card = state.cards[link.dataset.term];
+    const card = S.cardOf(state, link.dataset.term);
     if (!card) return hideTerm();
     popTerm = link.dataset.term;
     pop.innerHTML = `<p class="term-pop-title">${esc(card.title || popTerm)}</p>` + md(S.definitionOf(card));
@@ -705,7 +807,8 @@ details.history summary::-webkit-details-marker { display: none; }
 
   /** Moves through the current card's own section, or through the main sequence. */
   function step(delta) {
-    const section = S.sectionOf(state, state.cards[current]);
+    if (!order().includes(current)) return;
+    const section = S.sectionOf(state, current);
     const ids = S.cardsInSection(state, section ? section.id : null);
     const next = ids[ids.indexOf(current) + delta];
     if (next) location.hash = "c-" + next;

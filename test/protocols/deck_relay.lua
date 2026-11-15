@@ -7,8 +7,10 @@
 --     with raw text), install = "unset" for a relay whose raconteur-path is missing,
 --     expect = fields the JSON result must have, error = text the error must contain,
 --     opened = "server:file:line" after,
---     card = deck document written to a fresh file whose path the runner puts in request.path,
---     after = body_md the file holds afterwards, or `false` for byte-for-byte unchanged }
+--     card = JSON document written to a fresh file whose path the runner puts in request.path,
+--     md = card file text written the same way to a fresh `.md` file,
+--     after = body_md the JSON document (or whole text the card file) holds afterwards, or
+--     `false` for byte-for-byte unchanged }
 -- Every case also checks the exit code: 0 for ok results, 1 otherwise.
 --
 -- Fixture: a repo `main` with a second worktree `other`, a plain directory `plain`, and one
@@ -122,7 +124,16 @@ local CASES = {
   { "goto: file edited since the copy", "goto", go({ file = "edited.lua", sha = sha }),
     expect = { ok = true, changed_since_copy = true } },
 
-  -- fill: refresh every dynamic block in a deck document's body_md, in place.
+  -- fill: refresh every dynamic block of a card file, front matter kept as it is.
+  { "fill: a card file is filled whole", "fill", { worktree = main },
+    md = "---\ntitle: One pass\nkind: term\n---\n\n" .. stale .. "\n",
+    expect = { ok = true, sha = sha, changed = true },
+    after = "---\ntitle: One pass\nkind: term\n---\n\n" .. filled .. "\n" },
+  { "fill: an up-to-date card file is left byte-for-byte", "fill", { worktree = main },
+    md = "---\ntitle: One pass\n---\n\n" .. filled .. "\n",
+    expect = { ok = true, sha = sha, changed = false }, after = false },
+
+  -- fill: refresh every dynamic block in a JSON document's body_md, in place.
   { "fill: replaces the old copy and stamps HEAD", "fill", { worktree = main },
     card = { title = "One pass", body_md = stale },
     expect = { ok = true, sha = sha, changed = true }, after = filled },
@@ -165,9 +176,9 @@ end
 local failed = 0
 for index, case in ipairs(CASES) do
   local request, card_path, card_text = vim.tbl_extend("force", case[3] or {}, { command = case[2] }), nil, nil
-  if case.card then
-    card_path = ("%s/cards/card-%d.json"):format(dir, index)
-    card_text = pretty(case.card)
+  if case.card or case.md then
+    card_path = ("%s/cards/card-%d.%s"):format(dir, index, case.md and "md" or "json")
+    card_text = case.md or pretty(case.card)
     vim.fn.mkdir(dir .. "/cards", "p")
     vim.fn.writefile(vim.split(card_text, "\n", { plain = true }), card_path, "b")
     request = vim.tbl_extend("force", request, { path = card_path })
@@ -197,6 +208,10 @@ for index, case in ipairs(CASES) do
       local now = table.concat(vim.fn.readfile(card_path, "b"), "\n")
       if case.after == false then
         if now ~= card_text then problems[#problems + 1] = "document was rewritten: " .. now end
+      elseif case.md then
+        if now ~= case.after then
+          problems[#problems + 1] = "card file = " .. vim.inspect(now) .. ", expected " .. vim.inspect(case.after)
+        end
       else
         local doc = vim.json.decode(now)
         if doc.body_md ~= case.after then
